@@ -246,24 +246,29 @@ ${entitiesStr}
                 in some browser contexts — matches the approach used in
                 the actual game engine. */}
             <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W, height: CANVAS_H, pointerEvents: "none" }}>
-              {floor.map(([q, r]) => {
-                const { sx, sy } = hexToScreen(q, r);
-                return (
-                  <img
-                    key={hexKey(q, r)}
-                    src={HEX_TILE_IMG}
-                    alt=""
-                    style={{
-                      position: "absolute",
-                      left: sx - TILE_IMG_W / 2,
-                      top: sy - FACE_H / 2 - TILE_HEADROOM,
-                      width: TILE_IMG_W,
-                      height: TILE_IMG_H,
-                      imageRendering: "pixelated",
-                    }}
-                  />
-                );
-              })}
+              {/* Sorted back-to-front (by r, then q) so tiles painted later */}
+              {/* don't draw over the top of tiles that should be in front — */}
+              {/* same depth-sort the actual game engine uses. */}
+              {[...floor]
+                .sort((a, b) => a[1] - b[1] || a[0] - b[0])
+                .map(([q, r]) => {
+                  const { sx, sy } = hexToScreen(q, r);
+                  return (
+                    <img
+                      key={hexKey(q, r)}
+                      src={HEX_TILE_IMG}
+                      alt=""
+                      style={{
+                        position: "absolute",
+                        left: sx - TILE_IMG_W / 2,
+                        top: sy - FACE_H / 2 - TILE_HEADROOM,
+                        width: TILE_IMG_W,
+                        height: TILE_IMG_H,
+                        imageRendering: "pixelated",
+                      }}
+                    />
+                  );
+                })}
             </div>
 
             <svg
