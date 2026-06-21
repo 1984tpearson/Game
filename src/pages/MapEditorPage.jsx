@@ -1,17 +1,17 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import TileEditor from '../components/TileEditor.jsx';
+import MapEditor from '../components/MapEditor.jsx';
 
-export default function EditorPage() {
+export default function MapEditorPage() {
   return (
     <div style={styles.root}>
       <div style={styles.topBar}>
         <Link to="/" style={styles.backLink}>← back</Link>
-        <Link to="/map-editor" style={styles.navLink}>map editor</Link>
+        <Link to="/editor" style={styles.navLink}>tile fabricator</Link>
         <Link to="/game" style={styles.navLink}>play game →</Link>
       </div>
       <div style={styles.editorWrap}>
-        <TileEditor />
+        <MapEditor />
       </div>
     </div>
   );
@@ -27,7 +27,7 @@ const styles = {
   },
   topBar: {
     width: '100%',
-    maxWidth: '900px',
+    maxWidth: '960px',
     display: 'flex',
     justifyContent: 'space-between',
     marginBottom: '14px',
@@ -44,6 +44,6 @@ const styles = {
   },
   editorWrap: {
     width: '100%',
-    maxWidth: '900px',
+    maxWidth: '960px',
   },
 };

@@ -35,6 +35,17 @@ export default function LandingPage() {
             </div>
           </div>
         </Link>
+
+        <Link to="/map-editor" style={styles.cardLink}>
+          <div style={styles.card}>
+            <div style={styles.cardLabel}>LAY OUT</div>
+            <div style={styles.cardTitle}>Map Editor</div>
+            <div style={styles.cardDesc}>
+              Click together a scene's floor and entities visually, then export it straight
+              into the game's code.
+            </div>
+          </div>
+        </Link>
       </div>
 
       <footer style={styles.footer}>

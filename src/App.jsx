@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import LandingPage from './pages/LandingPage.jsx';
 import GamePage from './pages/GamePage.jsx';
 import EditorPage from './pages/EditorPage.jsx';
+import MapEditorPage from './pages/MapEditorPage.jsx';
 
 // basename must match vite.config.js's `base` — GitHub Pages serves this
 // site under /Game/, not the domain root, so the router needs to know that
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/game" element={<GamePage />} />
         <Route path="/editor" element={<EditorPage />} />
+        <Route path="/map-editor" element={<MapEditorPage />} />
       </Routes>
     </BrowserRouter>
   );

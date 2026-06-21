@@ -104,31 +104,67 @@ function stripJson(text) {
 //
 // Props (the "config"):
 //
-// theme: { colors, fonts, tileImg, tileImgW, tileImgH, tileSkirt }
+// theme: { colors, fonts, tileImg, tileImgW, tileImgH, tileSkirt, tileHeadroom }
 // scenes: {
 //   [sceneId]: {
 //     floor: [[q,r], ...],
-//     interactables: [{ q, r, id, label, color, kind, ... }],
-//     exits: [{ q, r, id, label, color, toScene }],
+//     entities: [
+//       {
+//         q, r,                 // anchor position
+//         footprint: [[q,r],...]  // OPTIONAL: extra tiles occupied (multi-tile
+//                                  // objects like buildings). Anchor tile is
+//                                  // always included automatically — don't
+//                                  // repeat it here.
+//         id, label, color,
+//         kind,                  // free-form string the game's onInteract
+//                                  // switches on: 'casework' | 'info' | 'npc'
+//                                  // | 'exit' | 'object' | anything else
+//         blocksMovement: bool,  // occupies the tile(s) like a wall
+//         trigger: 'enter' | 'use' | null,
+//                                  // 'enter' fires on walk-onto (classic
+//                                  // interactable behavior). 'use' is
+//                                  // reserved for a future interact-button.
+//                                  // null/omitted = decorative, no trigger.
+//         toScene, spawn         // only meaningful for kind:'exit' entities
+//       }, ...
+//     ],
 //     spawn: { q, r },
 //     generative: bool — if true, this scene's content is AI-generated
 //                 on first visit and persisted (e.g. a "world")
 //   }
 // }
 // startScene: sceneId to begin in
-// onInteract(interactable, helpers): called when player walks onto an
-//   interactable that isn't a plain exit; helpers exposes openOverlay,
+// onInteract(entity, helpers): called when player walks onto (or later,
+//   uses) an entity with trigger:'enter' whose kind isn't 'exit' (exits are
+//   handled generically by the engine). helpers exposes openOverlay,
 //   closeOverlay, callClaude, etc. so config-level code decides what
 //   happens (open a chat terminal, show info text, trigger generation).
 // generateScene(sceneId, context): async fn, called the first time a
 //   "generative" scene is entered; returns scene content to merge in
-//   (e.g. npcs, description) and is persisted for return visits.
+//   (e.g. entities, description) and is persisted for return visits.
 // renderOverlay(overlay, helpers): config-supplied render function for
 //   whatever overlay UI the game wants (chat terminal, NPC dialogue,
 //   info popup) — the engine just manages overlay open/close state and
 //   gives the config full control of what's drawn inside it.
 //
 // =====================================================================
+
+// Returns every (q,r) tile an entity occupies: its anchor plus any
+// footprint tiles, so multi-tile objects (buildings etc) can be checked
+// for movement-blocking and interaction in one place.
+function entityTiles(entity) {
+  const tiles = [{ q: entity.q, r: entity.r }];
+  if (entity.footprint) {
+    for (const [fq, fr] of entity.footprint) {
+      tiles.push({ q: entity.q + fq, r: entity.r + fr });
+    }
+  }
+  return tiles;
+}
+
+function entityOccupiesTile(entity, q, r) {
+  return entityTiles(entity).some((t) => t.q === q && t.r === r);
+}
 
 function HexEngine({
   theme,
@@ -149,6 +185,7 @@ function HexEngine({
 
   const scene = scenes[sceneId];
   const floor = floorSet(scene.floor);
+  const entities = scene.entities || [];
 
   const T = theme;
 
@@ -162,10 +199,14 @@ function HexEngine({
         const nq = prev.q + dir.dq;
         const nr = prev.r + dir.dr;
         if (!floor.has(hexKey(nq, nr))) return prev;
+        const blocked = entities.some(
+          (e) => e.blocksMovement && entityOccupiesTile(e, nq, nr)
+        );
+        if (blocked) return prev;
         return { q: nq, r: nr };
       });
     },
-    [floor]
+    [floor, entities]
   );
 
   function step(dir) {
@@ -199,22 +240,23 @@ function HexEngine({
   }
 
   // ---------------- Interaction detection ----------------
-  // Runs whenever playerPos or sceneId changes. Exits are handled by the
-  // engine generically (transition to another scene); everything else is
-  // delegated to the config's onInteract callback.
+  // Runs whenever playerPos or sceneId changes. Entities with kind:'exit'
+  // are handled generically by the engine (scene transition); everything
+  // else with trigger:'enter' is delegated to the config's onInteract
+  // callback. Entities with no trigger (or trigger:'use') don't fire here.
 
   React.useEffect(() => {
     if (overlay) return;
-    const hitExit = scene.exits?.find((ex) => ex.q === playerPos.q && ex.r === playerPos.r);
-    if (hitExit) {
-      enterScene(hitExit.toScene, hitExit.spawn);
+    const hitEntity = entities.find(
+      (e) => e.trigger === "enter" && entityOccupiesTile(e, playerPos.q, playerPos.r)
+    );
+    if (!hitEntity) return;
+    if (hitEntity.kind === "exit") {
+      enterScene(hitEntity.toScene, hitEntity.spawn);
       return;
     }
-    const hitInteractable = scene.interactables?.find(
-      (it) => it.q === playerPos.q && it.r === playerPos.r
-    );
-    if (hitInteractable && onInteract) {
-      onInteract(hitInteractable, {
+    if (onInteract) {
+      onInteract(hitEntity, {
         scene,
         sceneId,
         openOverlay: setOverlay,
@@ -245,7 +287,9 @@ function HexEngine({
     .map(([q, r]) => ({ q, r }))
     .sort((a, b) => a.r - b.r || a.q - b.q);
 
-  const allMarkers = [...(scene.interactables || []), ...(scene.exits || [])];
+  function isTileOccupied(q, r) {
+    return entities.some((e) => entityOccupiesTile(e, q, r));
+  }
 
   return (
     <div style={{ ...baseStyles.root, background: T.colors.bg, color: T.colors.text, fontFamily: T.fonts.body }}>
@@ -275,7 +319,7 @@ function HexEngine({
           <div style={{ position: "absolute", top: 0, left: 0, width: 640, height: 440 }}>
             {tiles.map(({ q, r }) => {
               const { sx, sy } = hexToScreen(q, r, originX, originY, stepX, stepY);
-              const isMarked = allMarkers.some((m) => m.q === q && m.r === r);
+              const isMarked = isTileOccupied(q, r);
               return (
                 <img
                   key={`${q}-${r}`}
@@ -301,32 +345,31 @@ function HexEngine({
             height="440"
             style={{ position: "absolute", top: 0, left: 0, background: "transparent" }}
           >
-            {/* Interactable markers */}
-            {(scene.interactables || []).map((it) => {
-              const { sx, sy } = hexToScreen(it.q, it.r, originX, originY, stepX, stepY);
+            {/* Entity markers — exits get a translucent hex highlight,
+                everything else gets a colored dot. Multi-tile entities
+                draw their marker centered on the anchor tile only. */}
+            {entities.map((e) => {
+              const { sx, sy } = hexToScreen(e.q, e.r, originX, originY, stepX, stepY);
+              if (e.kind === "exit") {
+                return (
+                  <g key={e.id}>
+                    <polygon
+                      points={pointsToStr(hexOutlinePoints(sx, sy, T.tileImgW / 2))}
+                      fill={e.color || T.colors.text}
+                      opacity="0.25"
+                    />
+                    <text x={sx} y={sy - 18} fontSize="8.5" fill={T.colors.text} textAnchor="middle" fontFamily="monospace">
+                      {e.label}
+                    </text>
+                  </g>
+                );
+              }
               return (
-                <g key={it.id}>
+                <g key={e.id}>
                   <ellipse cx={sx} cy={sy + 4} rx="9" ry="4" fill="#000" opacity="0.35" />
-                  <circle cx={sx} cy={sy - 4} r="7" fill={it.color || T.colors.accent} opacity="0.9" />
+                  <circle cx={sx} cy={sy - 4} r="7" fill={e.color || T.colors.accent} opacity="0.9" />
                   <text x={sx} y={sy - 18} fontSize="8.5" fill={T.colors.text} textAnchor="middle" fontFamily="monospace">
-                    {it.label}
-                  </text>
-                </g>
-              );
-            })}
-
-            {/* Exit markers */}
-            {(scene.exits || []).map((ex) => {
-              const { sx, sy } = hexToScreen(ex.q, ex.r, originX, originY, stepX, stepY);
-              return (
-                <g key={ex.id}>
-                  <polygon
-                    points={pointsToStr(hexOutlinePoints(sx, sy, T.tileImgW / 2))}
-                    fill={ex.color || T.colors.text}
-                    opacity="0.25"
-                  />
-                  <text x={sx} y={sy - 18} fontSize="8.5" fill={T.colors.text} textAnchor="middle" fontFamily="monospace">
-                    {ex.label}
+                    {e.label}
                   </text>
                 </g>
               );
@@ -548,12 +591,12 @@ const SCENES = {
       [0,2],[-1,2],[1,-2],[0,-2],
       [-1,3],[1,-3],
     ],
-    interactables: [
-      { q: -2, r: 0, id: "casework", label: "CASEWORK Terminal", color: "#8a3324", kind: "casework" },
-      { q: 2, r: -1, id: "crew1", label: "Crew Quarters", color: "#3d4a3a", kind: "info", text: "Bunks, mostly empty. Whoever isn't on shift is sleeping off the last dive." },
-      { q: -2, r: 2, id: "cargo", label: "Cargo Hold", color: "#c4a747", kind: "info", text: "Salvage crates, half-sorted. Something in the corner ticks faintly. Best not to ask." },
+    entities: [
+      { q: -2, r: 0, id: "casework", label: "CASEWORK Terminal", color: "#8a3324", kind: "casework", trigger: "enter", blocksMovement: false },
+      { q: 2, r: -1, id: "crew1", label: "Crew Quarters", color: "#3d4a3a", kind: "info", trigger: "enter", blocksMovement: false, text: "Bunks, mostly empty. Whoever isn't on shift is sleeping off the last dive." },
+      { q: -2, r: 2, id: "cargo", label: "Cargo Hold", color: "#c4a747", kind: "info", trigger: "enter", blocksMovement: false, text: "Salvage crates, half-sorted. Something in the corner ticks faintly. Best not to ask." },
+      { q: -1, r: 3, id: "airlock", label: "Airlock", color: "#e8dcc4", kind: "exit", trigger: "enter", toScene: "world" },
     ],
-    exits: [{ q: -1, r: 3, id: "airlock", label: "Airlock", color: "#e8dcc4", toScene: "world" }],
     spawn: { q: 0, r: 0 },
   },
   world: {
@@ -564,8 +607,9 @@ const SCENES = {
       [0,-1],[1,-1],[-1,-1],[-2,2],[2,-2],
       [0,2],[-1,2],[1,-2],
     ],
-    interactables: [],
-    exits: [{ q: -2, r: 0, id: "ship-exit", label: "Ship", color: "#e8dcc4", toScene: "ship", spawn: { q: 0, r: 0 } }],
+    entities: [
+      { q: -2, r: 0, id: "ship-exit", label: "Ship", color: "#e8dcc4", kind: "exit", trigger: "enter", toScene: "ship", spawn: { q: 0, r: 0 } },
+    ],
     spawn: { q: 0, r: 0 },
     generative: true,
   },
@@ -588,15 +632,17 @@ Generate exactly 2 npcs.`;
   const text = await callClaude(WORLD_SYSTEM_PROMPT, [{ role: "user", content: prompt }]);
   const parsed = JSON.parse(stripJson(text));
   const spots = [{ q: 2, r: -1 }, { q: -2, r: 1 }, { q: 1, r: 1 }];
-  const interactables = parsed.npcs.map((n, i) => ({
+  const npcEntities = parsed.npcs.map((n, i) => ({
     ...spots[i % spots.length],
     id: `npc-${i}`,
     label: n.name,
     color: n.color || "#8a3324",
     kind: "npc",
+    trigger: "enter",
+    blocksMovement: false,
     npc: n,
   }));
-  return { name: parsed.name, description: parsed.description, hook: parsed.hook, danger: parsed.danger, interactables, npcHistory: [] };
+  return { name: parsed.name, description: parsed.description, hook: parsed.hook, danger: parsed.danger, entities: npcEntities, npcHistory: [] };
 }
 
 // =====================================================================
