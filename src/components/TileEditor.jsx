@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { saveTile } from '../lib/tiles.js';
 
 // =================================================================
 // Matches the game's tile geometry exactly:
@@ -180,6 +181,9 @@ export default function HexTileEditor() {
   const [history, setHistory] = useState([]);
   const [exportStr, setExportStr] = useState("");
   const [exportImg, setExportImg] = useState(null);
+  const [tileName, setTileName] = useState("");
+  const [saveStatus, setSaveStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
+  const [saveError, setSaveError] = useState(null);
   const isDrawing = useRef(false);
   const shadowedThisStroke = useRef(new Set());
   const canvasRef = useRef(null);
@@ -333,6 +337,24 @@ export default function HexTileEditor() {
 
   function copyExport() {
     navigator.clipboard?.writeText(exportStr);
+  }
+
+  async function saveToLibrary() {
+    if (!exportImg) return; // must Generate export first so we have a data URL
+    if (!tileName.trim()) {
+      setSaveStatus("error");
+      setSaveError("Name your tile before saving.");
+      return;
+    }
+    setSaveStatus("saving");
+    setSaveError(null);
+    try {
+      await saveTile({ name: tileName.trim(), imageDataUrl: exportImg });
+      setSaveStatus("saved");
+    } catch (e) {
+      setSaveStatus("error");
+      setSaveError(e.message || "Save failed.");
+    }
   }
 
   // ---------------- Render grid ----------------
@@ -625,6 +647,28 @@ export default function HexTileEditor() {
           </div>
           <textarea readOnly value={exportStr} style={styles.exportTextarea} onClick={(e) => e.target.select()} />
           <button style={styles.exportBtn} onClick={copyExport}>Copy to clipboard</button>
+
+          <div style={{ ...styles.exportLabel, marginTop: "14px" }}>
+            or save this tile to the shared library, so it shows up in the Map Editor's tile picker
+          </div>
+          <input
+            style={styles.textInput}
+            value={tileName}
+            onChange={(e) => {
+              setTileName(e.target.value);
+              setSaveStatus(null);
+            }}
+            placeholder="tile name (e.g. mossy stone, scorched metal)"
+          />
+          <button style={styles.exportBtn} onClick={saveToLibrary} disabled={saveStatus === "saving"}>
+            {saveStatus === "saving" ? "Saving..." : "Save to library"}
+          </button>
+          {saveStatus === "saved" && (
+            <div style={{ fontSize: "10px", color: COLORS.brass }}>Saved — available in the Map Editor now.</div>
+          )}
+          {saveStatus === "error" && (
+            <div style={{ fontSize: "10px", color: COLORS.rust }}>{saveError}</div>
+          )}
         </div>
       )}
 
@@ -824,5 +868,14 @@ const styles = {
     fontSize: "10px",
     padding: "8px",
     resize: "vertical",
+  },
+  textInput: {
+    background: COLORS.panel,
+    border: `1px solid ${COLORS.border}`,
+    color: COLORS.text,
+    padding: "8px",
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "12px",
+    width: "100%",
   },
 };
