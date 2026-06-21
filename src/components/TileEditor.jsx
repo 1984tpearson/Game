@@ -105,29 +105,67 @@ function makeBlankGrid() {
   return Array.from({ length: GRID_H }, () => Array(GRID_W).fill(null));
 }
 
-// Nudges a hex color slightly in a random direction per RGB channel, for
-// a hand-painted/noisy texture effect rather than flat single-tone fills.
-function jitterColor(hex, amount = 12) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const clamp = (v) => Math.max(0, Math.min(255, v));
-  const jitter = () => Math.round((Math.random() - 0.5) * 2 * amount);
-  const nr = clamp(r + jitter());
-  const ng = clamp(g + jitter());
-  const nb = clamp(b + jitter());
-  const toHex = (v) => v.toString(16).padStart(2, "0");
-  return `#${toHex(nr)}${toHex(ng)}${toHex(nb)}`;
+// Converts a hex color to HSL ({h: 0-360, s: 0-100, l: 0-100}).
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) * 60;
+    else if (max === g) h = ((b - r) / d + 2) * 60;
+    else h = ((r - g) / d + 4) * 60;
+  }
+  return { h, s: s * 100, l: l * 100 };
 }
 
-// Darkens a hex color by a fixed amount per RGB channel, for the shadow tool.
-function darkenColor(hex, amount = 28) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const clamp = (v) => Math.max(0, Math.min(255, v));
-  const toHex = (v) => v.toString(16).padStart(2, "0");
-  return `#${toHex(clamp(r - amount))}${toHex(clamp(g - amount))}${toHex(clamp(b - amount))}`;
+// Converts HSL back to a hex color string.
+function hslToHex(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  s = Math.max(0, Math.min(100, s)) / 100;
+  l = Math.max(0, Math.min(100, l)) / 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let r, g, b;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const toHex = (v) =>
+    Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// Nudges a color's lightness and saturation slightly, with only a small hue
+// drift, so a jittered green stays recognizably green rather than drifting
+// toward an unrelated hue. `amount` (1-40 from the slider) scales hue drift
+// gently and light/saturation drift more noticeably, for a hand-painted
+// texture feel without color-shifting the palette choice.
+function jitterColor(hex, amount = 12) {
+  const { h, s, l } = hexToHsl(hex);
+  const hueDrift = (amount / 40) * 6; // small: max ~6 degrees at full slider
+  const slDrift = (amount / 40) * 14; // larger: max ~14 points at full slider
+  const nh = h + (Math.random() - 0.5) * 2 * hueDrift;
+  const ns = s + (Math.random() - 0.5) * 2 * slDrift;
+  const nl = l + (Math.random() - 0.5) * 2 * slDrift;
+  return hslToHex(nh, ns, nl);
+}
+
+// Darkens a hex color by a fixed 25% (multiplicative on lightness), for the
+// shadow tool. Multiplicative rather than subtracting a flat amount keeps
+// the darkening proportional regardless of how light/dark the original is.
+function darkenColor(hex, factor = 0.25) {
+  const { h, s, l } = hexToHsl(hex);
+  return hslToHex(h, s, l * (1 - factor));
 }
 
 export default function HexTileEditor() {
@@ -143,6 +181,7 @@ export default function HexTileEditor() {
   const [exportStr, setExportStr] = useState("");
   const [exportImg, setExportImg] = useState(null);
   const isDrawing = useRef(false);
+  const shadowedThisStroke = useRef(new Set());
   const canvasRef = useRef(null);
   const exportCanvasRef = useRef(null);
 
@@ -191,10 +230,14 @@ export default function HexTileEditor() {
         return setCell(g, x, y, null);
       }
       if (tool === "shadow") {
-        // Darkens whatever's already painted there; does nothing on empty
-        // cells regardless of preserveTransparency, since there's no pixel
-        // to shade.
+        // Darkens whatever's already painted there, but only once per
+        // continuous stroke — dragging back and forth over the same
+        // pixel within one drag won't keep stacking darkness. Does
+        // nothing on empty cells, regardless of preserveTransparency.
         if (existing === null) return g;
+        const cellKey = `${x},${y}`;
+        if (shadowedThisStroke.current.has(cellKey)) return g;
+        shadowedThisStroke.current.add(cellKey);
         return setCell(g, x, y, darkenColor(existing));
       }
       if (tool === "fill") {
@@ -224,6 +267,7 @@ export default function HexTileEditor() {
   function handlePointerDown(e) {
     e.preventDefault();
     isDrawing.current = true;
+    shadowedThisStroke.current = new Set();
     const { x, y } = cellFromEvent(e);
     applyTool(x, y, true);
   }
@@ -463,7 +507,7 @@ export default function HexTileEditor() {
             <button
               style={{ ...styles.toolBtn, ...(tool === "shadow" ? styles.toolBtnActive : {}) }}
               onClick={() => setTool("shadow")}
-              title="Darkens existing painted pixels — does nothing on empty cells"
+              title="Darkens existing painted pixels by 25%, capped once per stroke — does nothing on empty cells"
             >
               Shadow
             </button>
