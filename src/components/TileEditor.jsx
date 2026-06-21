@@ -11,7 +11,9 @@ const HEADROOM_H = 3; // extra space above the top face for tall art (grass, etc
 const TOP_FACE_H = 24;
 const SKIRT_H = 6;
 const GRID_H = HEADROOM_H + TOP_FACE_H + SKIRT_H; // 33
-const ZOOM = 12; // pixels-per-cell on screen
+const ZOOM = 9; // pixels-per-cell on screen — reduced from 12 so the full
+                // editor (canvas + sidebar) fits within a landscape iPad
+                // viewport (~1024px wide) without horizontal scrolling.
 
 // Pointy-top hex mask: which (x,y) cells count as "inside" the top face
 // outline, used both for the drawing guide and to grey out/dim cells
@@ -191,10 +193,114 @@ function darkenColor(hex, factor = 0.25) {
   return hslToHex(h, s, l * (1 - factor));
 }
 
+// Foreshortening ratio for the ellipse tool: a circle drawn "lying flat"
+// on the tile's raised top face should read as squashed vertically to
+// match the implied iso-style perspective, rather than a true circle
+// (which would look like it's standing upright). Derived from the top
+// face's own height:width ratio (24/39 ≈ 0.615) rather than guessed.
+const ELLIPSE_Y_RATIO = TOP_FACE_H / GRID_W;
+
+// Returns the set of {x,y} cells covered by a brush of the given size
+// centered at (cx,cy). Size 1 = single pixel, larger sizes grow as a
+// small square brush (simplest predictable shape at small pixel-art
+// sizes — a true circle brush looks lumpy/inconsistent below ~5px).
+function brushCells(cx, cy, size) {
+  const cells = [];
+  const half = Math.floor(size / 2);
+  for (let dy = -half; dy < size - half; dy++) {
+    for (let dx = -half; dx < size - half; dx++) {
+      cells.push({ x: cx + dx, y: cy + dy });
+    }
+  }
+  return cells;
+}
+
+// Bresenham line algorithm: returns every grid cell on the straight line
+// between two points, used by the line tool's preview and commit.
+function lineCells(x0, y0, x1, y1) {
+  const cells = [];
+  let dx = Math.abs(x1 - x0);
+  let dy = -Math.abs(y1 - y0);
+  let sx = x0 < x1 ? 1 : -1;
+  let sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  let x = x0;
+  let y = y0;
+  while (true) {
+    cells.push({ x, y });
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+  return cells;
+}
+
+// Midpoint ellipse algorithm, with the vertical radius pre-scaled by
+// ELLIPSE_Y_RATIO so the result reads as a flat circle on the tile's
+// implied perspective rather than a true circle. Returns the outline
+// cells (not filled) — a hollow ellipse, matching how the pencil/line
+// tools work (you build up fills with the Fill tool separately).
+function ellipseCells(cx, cy, radiusX) {
+  const radiusY = Math.max(1, Math.round(radiusX * ELLIPSE_Y_RATIO));
+  const cells = new Set();
+  const addCell = (x, y) => cells.add(`${x},${y}`);
+  let x = 0;
+  let y = radiusY;
+  let rxSq = radiusX * radiusX;
+  let rySq = radiusY * radiusY;
+  let d1 = rySq - rxSq * radiusY + 0.25 * rxSq;
+  let dx = 2 * rySq * x;
+  let dy = 2 * rxSq * y;
+  while (dx < dy) {
+    addCell(cx + x, cy + y); addCell(cx - x, cy + y);
+    addCell(cx + x, cy - y); addCell(cx - x, cy - y);
+    if (d1 < 0) {
+      x++;
+      dx += 2 * rySq;
+      d1 += dx + rySq;
+    } else {
+      x++;
+      y--;
+      dx += 2 * rySq;
+      dy -= 2 * rxSq;
+      d1 += dx - dy + rySq;
+    }
+  }
+  let d2 =
+    rySq * (x + 0.5) * (x + 0.5) + rxSq * (y - 1) * (y - 1) - rxSq * rySq;
+  while (y >= 0) {
+    addCell(cx + x, cy + y); addCell(cx - x, cy + y);
+    addCell(cx + x, cy - y); addCell(cx - x, cy - y);
+    if (d2 > 0) {
+      y--;
+      dy -= 2 * rxSq;
+      d2 += rxSq - dy;
+    } else {
+      y--;
+      x++;
+      dx += 2 * rySq;
+      dy -= 2 * rxSq;
+      d2 += dx - dy + rxSq;
+    }
+  }
+  return [...cells].map((s) => {
+    const [px, py] = s.split(",").map(Number);
+    return { x: px, y: py };
+  });
+}
+
 export default function HexTileEditor() {
   const [grid, setGrid] = useState(makeBlankGrid);
   const [color, setColor] = useState("#8a8278");
-  const [tool, setTool] = useState("pencil"); // pencil | eraser | fill | picker | shadow
+  const [tool, setTool] = useState("pencil"); // pencil | eraser | fill | picker | shadow | line | ellipse
+  const [brushSize, setBrushSize] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
   const [showMask, setShowMask] = useState(true);
   const [jitterEnabled, setJitterEnabled] = useState(false);
@@ -206,8 +312,11 @@ export default function HexTileEditor() {
   const [tileName, setTileName] = useState("");
   const [saveStatus, setSaveStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
   const [saveError, setSaveError] = useState(null);
+  const [exportPanelOpen, setExportPanelOpen] = useState(false);
   const isDrawing = useRef(false);
   const shadowedThisStroke = useRef(new Set());
+  const shapeStart = useRef(null); // {x,y} where a line/ellipse drag began
+  const [shapePreview, setShapePreview] = useState(null); // array of {x,y} cells, shown while dragging line/ellipse
   const canvasRef = useRef(null);
   const exportCanvasRef = useRef(null);
 
@@ -241,30 +350,50 @@ export default function HexTileEditor() {
     return next;
   }
 
+  function paintCells(g, cells, colorOverride) {
+    let next = g;
+    for (const { x, y } of cells) {
+      const paintColor = colorOverride !== undefined ? colorOverride : (jitterEnabled ? jitterColor(color, jitterAmount) : color);
+      if (preserveTransparency) {
+        const existing = next[y]?.[x] ?? null;
+        if (existing === null) continue;
+      }
+      next = setCell(next, x, y, paintColor);
+    }
+    return next;
+  }
+
   function applyTool(x, y, isStart) {
     setGrid((g) => {
       if (isStart) pushHistory(g);
       const existing = g[y]?.[x] ?? null;
 
       if (tool === "pencil") {
-        if (preserveTransparency && existing === null) return g;
-        const paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
-        return setCell(g, x, y, paintColor);
+        return paintCells(g, brushCells(x, y, brushSize));
       }
       if (tool === "eraser") {
         if (preserveTransparency) return g; // nothing to erase onto transparent without removing it
-        return setCell(g, x, y, null);
+        let next = g;
+        for (const cell of brushCells(x, y, brushSize)) {
+          next = setCell(next, cell.x, cell.y, null);
+        }
+        return next;
       }
       if (tool === "shadow") {
         // Darkens whatever's already painted there, but only once per
         // continuous stroke — dragging back and forth over the same
         // pixel within one drag won't keep stacking darkness. Does
         // nothing on empty cells, regardless of preserveTransparency.
-        if (existing === null) return g;
-        const cellKey = `${x},${y}`;
-        if (shadowedThisStroke.current.has(cellKey)) return g;
-        shadowedThisStroke.current.add(cellKey);
-        return setCell(g, x, y, darkenColor(existing));
+        let next = g;
+        for (const cell of brushCells(x, y, brushSize)) {
+          const cellKey = `${cell.x},${cell.y}`;
+          if (shadowedThisStroke.current.has(cellKey)) continue;
+          const cellExisting = next[cell.y]?.[cell.x] ?? null;
+          if (cellExisting === null) continue;
+          shadowedThisStroke.current.add(cellKey);
+          next = setCell(next, cell.x, cell.y, darkenColor(cellExisting));
+        }
+        return next;
       }
       if (tool === "fill") {
         if (preserveTransparency && existing === null) return g;
@@ -293,23 +422,55 @@ export default function HexTileEditor() {
   // across browsers — in particular, Safari/iPadOS doesn't always honor
   // touch-action:none for Apple Pencil input routed through legacy touch
   // handlers, which let the page scroll mid-stroke. Pointer events fix this.
+  //
+  // Line and ellipse work differently from the other tools: instead of
+  // painting continuously as the pointer moves, they record a start point
+  // on pointer-down, show a live preview as the pointer moves, and only
+  // commit the actual pixels on pointer-up (so you can drag to adjust
+  // the shape before releasing).
   function handlePointerDown(e) {
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    const { x, y } = cellFromEvent(e);
+    if (tool === "line" || tool === "ellipse") {
+      shapeStart.current = { x, y };
+      setShapePreview([{ x, y }]);
+      return;
+    }
     isDrawing.current = true;
     shadowedThisStroke.current = new Set();
-    const { x, y } = cellFromEvent(e);
     applyTool(x, y, true);
   }
   function handlePointerMove(e) {
+    const { x, y } = cellFromEvent(e);
+    if ((tool === "line" || tool === "ellipse") && shapeStart.current) {
+      e.preventDefault();
+      if (tool === "line") {
+        setShapePreview(lineCells(shapeStart.current.x, shapeStart.current.y, x, y));
+      } else {
+        const radiusX = Math.max(1, Math.round(Math.hypot(x - shapeStart.current.x, (y - shapeStart.current.y) / ELLIPSE_Y_RATIO)));
+        setShapePreview(ellipseCells(shapeStart.current.x, shapeStart.current.y, radiusX));
+      }
+      return;
+    }
     if (!isDrawing.current) return;
     e.preventDefault();
-    const { x, y } = cellFromEvent(e);
     applyTool(x, y, false);
   }
   function handlePointerUp(e) {
-    isDrawing.current = false;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if ((tool === "line" || tool === "ellipse") && shapeStart.current) {
+      if (shapePreview && shapePreview.length) {
+        setGrid((g) => {
+          pushHistory(g);
+          return paintCells(g, shapePreview);
+        });
+      }
+      shapeStart.current = null;
+      setShapePreview(null);
+      return;
+    }
+    isDrawing.current = false;
   }
 
   function undo() {
@@ -360,6 +521,7 @@ export default function HexTileEditor() {
     setExportImg(dataUrl);
     const b64 = dataUrl.split(",")[1];
     setExportStr(`const HEX_TILE_IMG = "data:image/png;base64,${b64}";`);
+    setExportPanelOpen(true);
   }
 
   function copyExport() {
@@ -513,6 +675,27 @@ export default function HexTileEditor() {
                 ))}
               </svg>
             )}
+
+            {/* Live preview while dragging a line or ellipse — shown in the
+                active color but semi-transparent, so it reads as a preview
+                rather than already-committed pixels. Nothing is painted
+                into the actual grid until pointer-up. */}
+            {shapePreview &&
+              shapePreview.map(({ x, y }, i) => (
+                <div
+                  key={`preview-${i}`}
+                  style={{
+                    position: "absolute",
+                    left: x * ZOOM,
+                    top: y * ZOOM,
+                    width: ZOOM,
+                    height: ZOOM,
+                    background: color,
+                    opacity: 0.6,
+                    pointerEvents: "none",
+                  }}
+                />
+              ))}
           </div>
 
           <div style={styles.canvasLabel}>
@@ -538,6 +721,22 @@ export default function HexTileEditor() {
           </div>
           <div style={styles.toolRow}>
             <button
+              style={{ ...styles.toolBtn, ...(tool === "line" ? styles.toolBtnActive : {}) }}
+              onClick={() => setTool("line")}
+              title="Drag to draw a straight line, release to commit"
+            >
+              Line
+            </button>
+            <button
+              style={{ ...styles.toolBtn, ...(tool === "ellipse" ? styles.toolBtnActive : {}) }}
+              onClick={() => setTool("ellipse")}
+              title="Drag to draw an ellipse outline, squashed to look flat on the tile's surface"
+            >
+              Ellipse
+            </button>
+          </div>
+          <div style={styles.toolRow}>
+            <button
               style={{ ...styles.toolBtn, ...(tool === "fill" ? styles.toolBtnActive : {}) }}
               onClick={() => setTool("fill")}
             >
@@ -559,6 +758,26 @@ export default function HexTileEditor() {
               Shadow
             </button>
           </div>
+
+          {(tool === "pencil" || tool === "eraser" || tool === "shadow") && (
+            <>
+              <div style={styles.sectionLabel}>brush size</div>
+              <div style={styles.brushSizeRow}>
+                {[1, 2, 3, 4, 6].map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => setBrushSize(size)}
+                    style={{
+                      ...styles.brushSizeBtn,
+                      ...(brushSize === size ? styles.toolBtnActive : {}),
+                    }}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           <div style={styles.sectionLabel}>color</div>
           {(() => {
@@ -638,62 +857,73 @@ export default function HexTileEditor() {
 
           <div style={styles.sectionLabel}>export</div>
           <button style={styles.exportBtn} onClick={generateExport}>Generate export</button>
+          {exportImg && !exportPanelOpen && (
+            <button style={styles.actionBtn} onClick={() => setExportPanelOpen(true)}>View last export</button>
+          )}
         </div>
       </div>
 
-      {exportImg && (
-        <div style={styles.exportPanel}>
-          <div style={styles.exportPreviewRow}>
-            <div>
-              <div style={styles.exportLabel}>preview (actual size)</div>
-              <img
-                src={exportImg}
-                alt="tile export"
-                style={{ width: GRID_W, height: GRID_H, imageRendering: "pixelated", border: `1px solid ${COLORS.border}` }}
-              />
+      {exportImg && exportPanelOpen && (
+        <div style={styles.exportOverlay} onClick={() => setExportPanelOpen(false)}>
+          <div style={styles.exportPanel} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.exportPanelHeader}>
+              <span>EXPORT</span>
+              <button style={styles.closeBtn} onClick={() => setExportPanelOpen(false)}>×</button>
             </div>
-            <div>
-              <div style={styles.exportLabel}>preview (6×, on dark)</div>
-              <img
-                src={exportImg}
-                alt="tile export zoomed"
-                style={{
-                  width: GRID_W * 6,
-                  height: GRID_H * 6,
-                  imageRendering: "pixelated",
-                  border: `1px solid ${COLORS.border}`,
-                  background: "#0c0a08",
-                }}
-              />
-            </div>
-          </div>
-          <div style={styles.exportLabel}>
-            copy this and paste it into your game file, replacing the existing HEX_TILE_IMG line
-          </div>
-          <textarea readOnly value={exportStr} style={styles.exportTextarea} onClick={(e) => e.target.select()} />
-          <button style={styles.exportBtn} onClick={copyExport}>Copy to clipboard</button>
+            <div style={styles.exportScroll}>
+              <div style={styles.exportPreviewRow}>
+                <div>
+                  <div style={styles.exportLabel}>preview (actual size)</div>
+                  <img
+                    src={exportImg}
+                    alt="tile export"
+                    style={{ width: GRID_W, height: GRID_H, imageRendering: "pixelated", border: `1px solid ${COLORS.border}` }}
+                  />
+                </div>
+                <div>
+                  <div style={styles.exportLabel}>preview (6×, on dark)</div>
+                  <img
+                    src={exportImg}
+                    alt="tile export zoomed"
+                    style={{
+                      width: GRID_W * 6,
+                      height: GRID_H * 6,
+                      imageRendering: "pixelated",
+                      border: `1px solid ${COLORS.border}`,
+                      background: "#0c0a08",
+                    }}
+                  />
+                </div>
+              </div>
+              <div style={styles.exportLabel}>
+                copy this and paste it into your game file, replacing the existing HEX_TILE_IMG line
+              </div>
+              <textarea readOnly value={exportStr} style={styles.exportTextarea} onClick={(e) => e.target.select()} />
+              <button style={styles.exportBtn} onClick={copyExport}>Copy to clipboard</button>
 
-          <div style={{ ...styles.exportLabel, marginTop: "14px" }}>
-            or save this tile to the shared library, so it shows up in the Map Editor's tile picker
+              <div style={{ ...styles.exportLabel, marginTop: "14px" }}>
+                or save this tile to the shared library, so it shows up in the Map Editor's tile picker
+              </div>
+              <input
+                style={styles.textInput}
+                value={tileName}
+                onChange={(e) => {
+                  setTileName(e.target.value);
+                  setSaveStatus(null);
+                }}
+                placeholder="tile name (e.g. mossy stone, scorched metal)"
+              />
+              <button style={styles.exportBtn} onClick={saveToLibrary} disabled={saveStatus === "saving"}>
+                {saveStatus === "saving" ? "Saving..." : "Save to library"}
+              </button>
+              {saveStatus === "saved" && (
+                <div style={{ fontSize: "10px", color: COLORS.brass }}>Saved — available in the Map Editor now.</div>
+              )}
+              {saveStatus === "error" && (
+                <div style={{ fontSize: "10px", color: COLORS.rust }}>{saveError}</div>
+              )}
+            </div>
           </div>
-          <input
-            style={styles.textInput}
-            value={tileName}
-            onChange={(e) => {
-              setTileName(e.target.value);
-              setSaveStatus(null);
-            }}
-            placeholder="tile name (e.g. mossy stone, scorched metal)"
-          />
-          <button style={styles.exportBtn} onClick={saveToLibrary} disabled={saveStatus === "saving"}>
-            {saveStatus === "saving" ? "Saving..." : "Save to library"}
-          </button>
-          {saveStatus === "saved" && (
-            <div style={{ fontSize: "10px", color: COLORS.brass }}>Saved — available in the Map Editor now.</div>
-          )}
-          {saveStatus === "error" && (
-            <div style={{ fontSize: "10px", color: COLORS.rust }}>{saveError}</div>
-          )}
         </div>
       )}
 
@@ -725,7 +955,7 @@ const styles = {
   root: {
     background: COLORS.bg,
     color: COLORS.text,
-    minHeight: "600px",
+    minHeight: "auto",
     fontFamily: "'Space Mono', monospace",
     border: `1px solid ${COLORS.border}`,
     padding: "0",
@@ -752,9 +982,10 @@ const styles = {
   },
   body: {
     display: "flex",
-    flexWrap: "wrap",
-    gap: "20px",
-    padding: "18px",
+    flexWrap: "nowrap",
+    gap: "16px",
+    padding: "14px",
+    alignItems: "flex-start",
   },
   canvasWrap: {
     display: "flex",
@@ -789,6 +1020,20 @@ const styles = {
   toolBtnActive: {
     color: COLORS.brass,
     borderColor: COLORS.brass,
+  },
+  brushSizeRow: {
+    display: "flex",
+    gap: "4px",
+  },
+  brushSizeBtn: {
+    flex: 1,
+    background: COLORS.panel,
+    border: `1px solid ${COLORS.border}`,
+    color: COLORS.textDim,
+    padding: "6px",
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "11px",
+    cursor: "pointer",
   },
   sectionLabel: {
     fontSize: "10px",
@@ -866,9 +1111,46 @@ const styles = {
     fontSize: "11px",
     cursor: "pointer",
   },
+  exportOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.7)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
   exportPanel: {
-    borderTop: `1px solid ${COLORS.border}`,
-    padding: "18px",
+    background: COLORS.bg,
+    border: `1px solid ${COLORS.brass}`,
+    width: "90%",
+    maxWidth: "600px",
+    maxHeight: "85vh",
+    display: "flex",
+    flexDirection: "column",
+  },
+  exportPanelHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "10px 14px",
+    borderBottom: `1px solid ${COLORS.border}`,
+    fontSize: "12px",
+    fontWeight: 700,
+    color: COLORS.brass,
+    letterSpacing: "0.08em",
+  },
+  closeBtn: {
+    background: "transparent",
+    border: "none",
+    color: COLORS.text,
+    fontSize: "18px",
+    cursor: "pointer",
+    lineHeight: 1,
+  },
+  exportScroll: {
+    padding: "14px",
+    overflowY: "auto",
     display: "flex",
     flexDirection: "column",
     gap: "10px",
