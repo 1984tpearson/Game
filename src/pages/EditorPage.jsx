@@ -27,7 +27,7 @@ const styles = {
   },
   topBar: {
     width: '100%',
-    maxWidth: '900px',
+    maxWidth: '1200px',
     display: 'flex',
     justifyContent: 'space-between',
     marginBottom: '14px',
@@ -44,6 +44,7 @@ const styles = {
   },
   editorWrap: {
     width: '100%',
-    maxWidth: '900px',
+    maxWidth: '1200px',
+    overflowX: 'auto',
   },
 };

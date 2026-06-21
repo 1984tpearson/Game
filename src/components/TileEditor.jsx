@@ -1252,11 +1252,12 @@ const styles = {
   },
   colorPicker: {
     marginTop: "6px",
-    width: "100%",
+    width: "60px",
     height: "32px",
     background: "transparent",
     border: `1px solid ${COLORS.border}`,
     cursor: "pointer",
+    flexShrink: 0,
   },
   checkRow: {
     fontSize: "11px",
