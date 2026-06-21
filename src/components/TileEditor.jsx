@@ -17,13 +17,42 @@ const ZOOM = 12; // pixels-per-cell on screen
 // outline, used both for the drawing guide and to grey out/dim cells
 // outside the tile shape. The headroom band above the top face is left
 // fully open/undimmed (no mask) since it's free space for tall art like
-// grass to extend into. Derived geometrically from a pointy-top hex
-// centered in the top-face region.
+// grass to extend into.
+//
+// Built from actual hexagon vertices (point-in-polygon test) rather than
+// an approximated inequality — a pointy-top hex has single points at the
+// top and bottom, with flat vertical edges on the left/right connecting
+// them. An earlier version of this mask used a distance-based formula
+// that produced flat top/bottom edges instead (the opposite shape).
+function pointInPolygon(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 function buildHexMask() {
   const cx = GRID_W / 2;
   const cy = HEADROOM_H + TOP_FACE_H / 2;
-  const rx = GRID_W / 2 - 0.5;
-  const ry = TOP_FACE_H / 2 - 0.5;
+  const halfW = GRID_W / 2;
+  const halfH = TOP_FACE_H / 2;
+
+  // Pointy-top hex vertices: a single point at top, a single point at
+  // bottom, flat vertical edges on the left and right in between.
+  const hexVerts = [
+    [cx, cy - halfH], // top point
+    [cx + halfW, cy - halfH / 2], // upper-right
+    [cx + halfW, cy + halfH / 2], // lower-right
+    [cx, cy + halfH], // bottom point
+    [cx - halfW, cy + halfH / 2], // lower-left
+    [cx - halfW, cy - halfH / 2], // upper-left
+  ];
+
   const mask = [];
   for (let y = 0; y < GRID_H; y++) {
     const row = [];
@@ -34,18 +63,11 @@ function buildHexMask() {
       } else if (y >= HEADROOM_H + TOP_FACE_H) {
         // skirt region: roughly trapezoidal, narrower than the full top face
         const skirtProgress = (y - (HEADROOM_H + TOP_FACE_H)) / SKIRT_H;
-        const inset = rx * 0.25 * skirtProgress;
+        const inset = halfW * 0.25 * skirtProgress;
         const dx = Math.abs(x + 0.5 - cx);
-        row.push(dx <= rx - inset ? 1 : 0);
+        row.push(dx <= halfW - inset ? 1 : 0);
       } else {
-        // top face: pointy-top hexagon approximation via 6 edges
-        const dx = (x + 0.5 - cx) / rx;
-        const dy = (y + 0.5 - cy) / ry;
-        const inside =
-          Math.abs(dx) <= 1 &&
-          Math.abs(dy) <= 1 &&
-          Math.abs(dx) + 0.55 * Math.abs(dy) <= 1.05;
-        row.push(inside ? 1 : 0);
+        row.push(pointInPolygon(x + 0.5, y + 0.5, hexVerts) ? 1 : 0);
       }
     }
     mask.push(row);
