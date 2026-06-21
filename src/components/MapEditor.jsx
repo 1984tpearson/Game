@@ -147,9 +147,17 @@ export default function MapEditor() {
       if (paintedThisStroke.current.has(key)) return;
       paintedThisStroke.current.add(key);
       setFloor((prev) => {
-        const exists = prev.some(([pq, pr]) => hexKey(pq, pr) === key);
-        if (exists) return prev; // existing tiles keep whatever art they were painted with
-        return [...prev, [q, r, activeTileId]];
+        const idx = prev.findIndex(([pq, pr]) => hexKey(pq, pr) === key);
+        if (idx === -1) return [...prev, [q, r, activeTileId]];
+        // Cell already has a tile — repaint it with whichever tile is
+        // currently active. This only happens when the user actively
+        // paints over that specific cell (not when they merely switch
+        // the picker selection elsewhere), so existing tiles still don't
+        // get silently repainted just by picking a different art.
+        if (prev[idx][2] === activeTileId) return prev; // no-op, avoid extra renders
+        const next = [...prev];
+        next[idx] = [q, r, activeTileId];
+        return next;
       });
     } else if (tool === "erase") {
       if (paintedThisStroke.current.has(key)) return;
@@ -271,7 +279,7 @@ ${entitiesStr}
 
       <div style={styles.body}>
         <div style={styles.canvasWrap}>
-          <div style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}` }}>
+          <div style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}`, touchAction: "none" }}>
             {/* Tile art layer: plain HTML <img> tags (not SVG <image>),
                 since SVG <image> with data URIs doesn't render reliably
                 in some browser contexts — matches the approach used in

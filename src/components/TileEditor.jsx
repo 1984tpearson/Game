@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { saveTile } from '../lib/tiles.js';
+import { saveTile, listTiles, updateTile } from '../lib/tiles.js';
 
 // =================================================================
 // Matches the game's tile geometry exactly:
@@ -128,6 +128,49 @@ const PALETTE_ROW_LABELS = [
 
 function makeBlankGrid() {
   return Array.from({ length: GRID_H }, () => Array(GRID_W).fill(null));
+}
+
+// Decodes a saved tile's PNG data URL back into the editable grid array
+// (the inverse of generateExport's grid-to-canvas-to-PNG step). Fully
+// transparent pixels become null (empty cells); anything else becomes
+// its hex color string. Returns a Promise since image loading is async.
+function decodeImageToGrid(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = GRID_W;
+      canvas.height = GRID_H;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, GRID_W, GRID_H);
+      ctx.drawImage(img, 0, 0, GRID_W, GRID_H);
+      let pixels;
+      try {
+        pixels = ctx.getImageData(0, 0, GRID_W, GRID_H).data;
+      } catch (e) {
+        reject(e);
+        return;
+      }
+      const grid = makeBlankGrid();
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          const i = (y * GRID_W + x) * 4;
+          const a = pixels[i + 3];
+          if (a === 0) {
+            grid[y][x] = null;
+          } else {
+            const r = pixels[i].toString(16).padStart(2, "0");
+            const g = pixels[i + 1].toString(16).padStart(2, "0");
+            const b = pixels[i + 2].toString(16).padStart(2, "0");
+            grid[y][x] = `#${r}${g}${b}`;
+          }
+        }
+      }
+      resolve(grid);
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
 }
 
 // Converts a hex color to HSL ({h: 0-360, s: 0-100, l: 0-100}).
@@ -313,6 +356,12 @@ export default function HexTileEditor() {
   const [saveStatus, setSaveStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
   const [saveError, setSaveError] = useState(null);
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
+  const [loadedTileId, setLoadedTileId] = useState(null); // null = unsaved/new tile
+  const [libraryPanelOpen, setLibraryPanelOpen] = useState(false);
+  const [tileLibrary, setTileLibrary] = useState([]);
+  const [tileLibraryLoading, setTileLibraryLoading] = useState(false);
+  const [tileLibraryError, setTileLibraryError] = useState(null);
+  const [loadingTile, setLoadingTile] = useState(false);
   const isDrawing = useRef(false);
   const shadowedThisStroke = useRef(new Set());
   const shapeStart = useRef(null); // {x,y} where a line/ellipse drag began
@@ -528,7 +577,7 @@ export default function HexTileEditor() {
     navigator.clipboard?.writeText(exportStr);
   }
 
-  async function saveToLibrary() {
+  async function saveToLibrary(forceNew = false) {
     if (!exportImg) return; // must Generate export first so we have a data URL
     if (!tileName.trim()) {
       setSaveStatus("error");
@@ -538,12 +587,64 @@ export default function HexTileEditor() {
     setSaveStatus("saving");
     setSaveError(null);
     try {
-      await saveTile({ name: tileName.trim(), imageDataUrl: exportImg });
+      if (loadedTileId && !forceNew) {
+        await updateTile(loadedTileId, { name: tileName.trim(), imageDataUrl: exportImg });
+      } else {
+        const created = await saveTile({ name: tileName.trim(), imageDataUrl: exportImg });
+        setLoadedTileId(created.id);
+      }
       setSaveStatus("saved");
     } catch (e) {
       setSaveStatus("error");
       setSaveError(e.message || "Save failed.");
     }
+  }
+
+  // ---------------- Load from library ----------------
+
+  async function openLibraryPanel() {
+    setLibraryPanelOpen(true);
+    setTileLibraryLoading(true);
+    setTileLibraryError(null);
+    try {
+      const tiles = await listTiles();
+      setTileLibrary(tiles);
+    } catch (e) {
+      setTileLibraryError(e.message || "Failed to load tile library.");
+    } finally {
+      setTileLibraryLoading(false);
+    }
+  }
+
+  async function loadTileFromLibrary(tile) {
+    setLoadingTile(true);
+    try {
+      const decodedGrid = await decodeImageToGrid(tile.image_data_url);
+      pushHistory(grid);
+      setGrid(decodedGrid);
+      setLoadedTileId(tile.id);
+      setTileName(tile.name);
+      setLibraryPanelOpen(false);
+      // Clear any stale export from before this load, so "View last export"
+      // doesn't show pixels that no longer match what's on the canvas.
+      setExportImg(null);
+      setExportStr("");
+      setSaveStatus(null);
+    } catch (e) {
+      setTileLibraryError(e.message || "Failed to load that tile.");
+    } finally {
+      setLoadingTile(false);
+    }
+  }
+
+  function startNewTile() {
+    pushHistory(grid);
+    setGrid(makeBlankGrid());
+    setLoadedTileId(null);
+    setTileName("");
+    setExportImg(null);
+    setExportStr("");
+    setSaveStatus(null);
   }
 
   // ---------------- Render grid ----------------
@@ -850,6 +951,15 @@ export default function HexTileEditor() {
             </div>
           )}
 
+          <div style={styles.sectionLabel}>tile library</div>
+          <button style={styles.actionBtn} onClick={openLibraryPanel}>Load tile...</button>
+          {loadedTileId && (
+            <>
+              <div style={styles.hint}>editing: {tileName || "(unnamed)"}</div>
+              <button style={styles.actionBtn} onClick={startNewTile}>Start new tile</button>
+            </>
+          )}
+
           <div style={styles.sectionLabel}>actions</div>
           <button style={styles.actionBtn} onClick={undo}>Undo</button>
           <button style={styles.actionBtn} onClick={fillMaskOutline}>Fill hex outline</button>
@@ -913,14 +1023,53 @@ export default function HexTileEditor() {
                 }}
                 placeholder="tile name (e.g. mossy stone, scorched metal)"
               />
-              <button style={styles.exportBtn} onClick={saveToLibrary} disabled={saveStatus === "saving"}>
-                {saveStatus === "saving" ? "Saving..." : "Save to library"}
+              <button style={styles.exportBtn} onClick={() => saveToLibrary(false)} disabled={saveStatus === "saving"}>
+                {saveStatus === "saving" ? "Saving..." : loadedTileId ? "Update tile" : "Save to library"}
               </button>
+              {loadedTileId && (
+                <button style={styles.actionBtn} onClick={() => saveToLibrary(true)} disabled={saveStatus === "saving"}>
+                  Save as new tile instead
+                </button>
+              )}
               {saveStatus === "saved" && (
                 <div style={{ fontSize: "10px", color: COLORS.brass }}>Saved — available in the Map Editor now.</div>
               )}
               {saveStatus === "error" && (
                 <div style={{ fontSize: "10px", color: COLORS.rust }}>{saveError}</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {libraryPanelOpen && (
+        <div style={styles.exportOverlay} onClick={() => setLibraryPanelOpen(false)}>
+          <div style={styles.exportPanel} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.exportPanelHeader}>
+              <span>LOAD TILE</span>
+              <button style={styles.closeBtn} onClick={() => setLibraryPanelOpen(false)}>×</button>
+            </div>
+            <div style={styles.exportScroll}>
+              {tileLibraryLoading && <div style={styles.hint}>loading tile library...</div>}
+              {tileLibraryError && <div style={{ ...styles.hint, color: COLORS.rust }}>{tileLibraryError}</div>}
+              {loadingTile && <div style={styles.hint}>loading tile...</div>}
+              {!tileLibraryLoading && !tileLibraryError && tileLibrary.length === 0 && (
+                <div style={styles.hint}>no saved tiles yet</div>
+              )}
+              {!tileLibraryLoading && !tileLibraryError && (
+                <div style={styles.libraryGrid}>
+                  {tileLibrary.map((t) => (
+                    <button
+                      key={t.id}
+                      style={styles.libraryTileBtn}
+                      onClick={() => loadTileFromLibrary(t)}
+                      disabled={loadingTile}
+                    >
+                      <img src={t.image_data_url} alt={t.name} style={styles.libraryTileImg} />
+                      <div style={styles.libraryTileName}>{t.name}</div>
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -1183,6 +1332,42 @@ const styles = {
     padding: "8px",
     fontFamily: "'Space Mono', monospace",
     fontSize: "12px",
+    width: "100%",
+  },
+  hint: {
+    fontSize: "9px",
+    color: COLORS.textDim,
+    fontStyle: "italic",
+    marginTop: "2px",
+  },
+  libraryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, 1fr)",
+    gap: "8px",
+  },
+  libraryTileBtn: {
+    background: COLORS.panel,
+    border: `1px solid ${COLORS.border}`,
+    cursor: "pointer",
+    padding: "6px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "4px",
+  },
+  libraryTileImg: {
+    width: "48px",
+    height: "40px",
+    objectFit: "contain",
+    imageRendering: "pixelated",
+  },
+  libraryTileName: {
+    fontSize: "9px",
+    color: COLORS.textDim,
+    textAlign: "center",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     width: "100%",
   },
 };
