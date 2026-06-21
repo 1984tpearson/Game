@@ -6,28 +6,33 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 // =================================================================
 
 const GRID_W = 39;
-const GRID_H = 30;
-const ZOOM = 12; // pixels-per-cell on screen
-
+const HEADROOM_H = 3; // extra space above the top face for tall art (grass, etc) to poke into
 const TOP_FACE_H = 24;
-const SKIRT_H = GRID_H - TOP_FACE_H; // 6
+const SKIRT_H = 6;
+const GRID_H = HEADROOM_H + TOP_FACE_H + SKIRT_H; // 33
+const ZOOM = 12; // pixels-per-cell on screen
 
 // Pointy-top hex mask: which (x,y) cells count as "inside" the top face
 // outline, used both for the drawing guide and to grey out/dim cells
-// outside the tile shape. Derived geometrically from a pointy-top hex
+// outside the tile shape. The headroom band above the top face is left
+// fully open/undimmed (no mask) since it's free space for tall art like
+// grass to extend into. Derived geometrically from a pointy-top hex
 // centered in the top-face region.
 function buildHexMask() {
   const cx = GRID_W / 2;
-  const cy = TOP_FACE_H / 2;
+  const cy = HEADROOM_H + TOP_FACE_H / 2;
   const rx = GRID_W / 2 - 0.5;
   const ry = TOP_FACE_H / 2 - 0.5;
   const mask = [];
   for (let y = 0; y < GRID_H; y++) {
     const row = [];
     for (let x = 0; x < GRID_W; x++) {
-      if (y >= TOP_FACE_H) {
+      if (y < HEADROOM_H) {
+        // headroom band: always "inside" (undimmed), free drawing space
+        row.push(1);
+      } else if (y >= HEADROOM_H + TOP_FACE_H) {
         // skirt region: roughly trapezoidal, narrower than the full top face
-        const skirtProgress = (y - TOP_FACE_H) / SKIRT_H;
+        const skirtProgress = (y - (HEADROOM_H + TOP_FACE_H)) / SKIRT_H;
         const inset = rx * 0.25 * skirtProgress;
         const dx = Math.abs(x + 0.5 - cx);
         row.push(dx <= rx - inset ? 1 : 0);
@@ -100,12 +105,40 @@ function makeBlankGrid() {
   return Array.from({ length: GRID_H }, () => Array(GRID_W).fill(null));
 }
 
+// Nudges a hex color slightly in a random direction per RGB channel, for
+// a hand-painted/noisy texture effect rather than flat single-tone fills.
+function jitterColor(hex, amount = 12) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const clamp = (v) => Math.max(0, Math.min(255, v));
+  const jitter = () => Math.round((Math.random() - 0.5) * 2 * amount);
+  const nr = clamp(r + jitter());
+  const ng = clamp(g + jitter());
+  const nb = clamp(b + jitter());
+  const toHex = (v) => v.toString(16).padStart(2, "0");
+  return `#${toHex(nr)}${toHex(ng)}${toHex(nb)}`;
+}
+
+// Darkens a hex color by a fixed amount per RGB channel, for the shadow tool.
+function darkenColor(hex, amount = 28) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const clamp = (v) => Math.max(0, Math.min(255, v));
+  const toHex = (v) => v.toString(16).padStart(2, "0");
+  return `#${toHex(clamp(r - amount))}${toHex(clamp(g - amount))}${toHex(clamp(b - amount))}`;
+}
+
 export default function HexTileEditor() {
   const [grid, setGrid] = useState(makeBlankGrid);
   const [color, setColor] = useState("#8a8278");
-  const [tool, setTool] = useState("pencil"); // pencil | eraser | fill | picker
+  const [tool, setTool] = useState("pencil"); // pencil | eraser | fill | picker | shadow
   const [showGrid, setShowGrid] = useState(true);
   const [showMask, setShowMask] = useState(true);
+  const [jitterEnabled, setJitterEnabled] = useState(false);
+  const [jitterAmount, setJitterAmount] = useState(12);
+  const [preserveTransparency, setPreserveTransparency] = useState(false);
   const [history, setHistory] = useState([]);
   const [exportStr, setExportStr] = useState("");
   const [exportImg, setExportImg] = useState(null);
@@ -146,14 +179,32 @@ export default function HexTileEditor() {
   function applyTool(x, y, isStart) {
     setGrid((g) => {
       if (isStart) pushHistory(g);
-      if (tool === "pencil") return setCell(g, x, y, color);
-      if (tool === "eraser") return setCell(g, x, y, null);
+      const existing = g[y]?.[x] ?? null;
+
+      if (tool === "pencil") {
+        if (preserveTransparency && existing === null) return g;
+        const paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+        return setCell(g, x, y, paintColor);
+      }
+      if (tool === "eraser") {
+        if (preserveTransparency) return g; // nothing to erase onto transparent without removing it
+        return setCell(g, x, y, null);
+      }
+      if (tool === "shadow") {
+        // Darkens whatever's already painted there; does nothing on empty
+        // cells regardless of preserveTransparency, since there's no pixel
+        // to shade.
+        if (existing === null) return g;
+        return setCell(g, x, y, darkenColor(existing));
+      }
       if (tool === "fill") {
-        const target = g[y]?.[x] ?? null;
-        return floodFill(g, x, y, target, color);
+        if (preserveTransparency && existing === null) return g;
+        const target = existing;
+        const paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+        return floodFill(g, x, y, target, paintColor);
       }
       if (tool === "picker") {
-        const picked = g[y]?.[x];
+        const picked = existing;
         if (picked) setColor(picked);
         return g;
       }
@@ -204,7 +255,7 @@ export default function HexTileEditor() {
     pushHistory(grid);
     setGrid((g) => {
       const next = cloneGrid(g);
-      for (let y = 0; y < GRID_H; y++) {
+      for (let y = HEADROOM_H; y < GRID_H; y++) {
         for (let x = 0; x < GRID_W; x++) {
           if (HEX_MASK[y][x] && !next[y][x]) next[y][x] = "#3a3225";
         }
@@ -247,7 +298,7 @@ export default function HexTileEditor() {
       <style>{fontImports}</style>
       <header style={styles.header}>
         <span style={styles.headerStamp}>TILE FABRICATOR</span>
-        <span style={styles.headerSub}>39×30 · pointy-top hex · 24px face / 6px skirt</span>
+        <span style={styles.headerSub}>39×33 · pointy-top hex · 3px headroom / 24px face / 6px skirt</span>
       </header>
 
       <div style={styles.body}>
@@ -312,12 +363,26 @@ export default function HexTileEditor() {
               )
             )}
 
+            {/* Headroom boundary line (top face starts here) */}
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                top: HEADROOM_H * ZOOM,
+                width: GRID_W * ZOOM,
+                height: 1,
+                background: COLORS.brass,
+                opacity: 0.45,
+                pointerEvents: "none",
+              }}
+            />
+
             {/* Skirt boundary line */}
             <div
               style={{
                 position: "absolute",
                 left: 0,
-                top: TOP_FACE_H * ZOOM,
+                top: (HEADROOM_H + TOP_FACE_H) * ZOOM,
                 width: GRID_W * ZOOM,
                 height: 1,
                 background: COLORS.rust,
@@ -360,8 +425,8 @@ export default function HexTileEditor() {
           </div>
 
           <div style={styles.canvasLabel}>
-            <span style={{ color: COLORS.brass }}>top face</span> above the rust line ·{" "}
-            <span style={{ color: COLORS.rust }}>skirt</span> below
+            <span style={{ color: COLORS.brass }}>top face</span> between the lines ·{" "}
+            <span style={{ color: COLORS.rust }}>skirt</span> below · headroom above for tall art
           </div>
         </div>
 
@@ -392,6 +457,15 @@ export default function HexTileEditor() {
               onClick={() => setTool("picker")}
             >
               Picker
+            </button>
+          </div>
+          <div style={styles.toolRow}>
+            <button
+              style={{ ...styles.toolBtn, ...(tool === "shadow" ? styles.toolBtnActive : {}) }}
+              onClick={() => setTool("shadow")}
+              title="Darkens existing painted pixels — does nothing on empty cells"
+            >
+              Shadow
             </button>
           </div>
 
@@ -438,6 +512,33 @@ export default function HexTileEditor() {
             <input type="checkbox" checked={showMask} onChange={(e) => setShowMask(e.target.checked)} />
             dim outside hex
           </label>
+
+          <div style={styles.sectionLabel}>paint behavior</div>
+          <label style={styles.checkRow}>
+            <input
+              type="checkbox"
+              checked={preserveTransparency}
+              onChange={(e) => setPreserveTransparency(e.target.checked)}
+            />
+            preserve transparency
+          </label>
+          <label style={styles.checkRow}>
+            <input type="checkbox" checked={jitterEnabled} onChange={(e) => setJitterEnabled(e.target.checked)} />
+            randomize color (texture)
+          </label>
+          {jitterEnabled && (
+            <div style={styles.jitterRow}>
+              <input
+                type="range"
+                min="1"
+                max="40"
+                value={jitterAmount}
+                onChange={(e) => setJitterAmount(Number(e.target.value))}
+                style={styles.jitterSlider}
+              />
+              <span style={styles.jitterValue}>{jitterAmount}</span>
+            </div>
+          )}
 
           <div style={styles.sectionLabel}>actions</div>
           <button style={styles.actionBtn} onClick={undo}>Undo</button>
@@ -616,6 +717,22 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: "6px",
+  },
+  jitterRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginTop: "4px",
+    marginLeft: "20px",
+  },
+  jitterSlider: {
+    flex: 1,
+  },
+  jitterValue: {
+    fontSize: "10px",
+    color: COLORS.brass,
+    minWidth: "20px",
+    textAlign: "right",
   },
   actionBtn: {
     background: COLORS.panel,
