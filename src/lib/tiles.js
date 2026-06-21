@@ -13,6 +13,26 @@ export async function listTiles() {
   return data;
 }
 
+// Fetches a specific set of tiles by ID, used by the game engine to
+// resolve the tile references baked into a scene's floor data (each
+// floor cell can optionally point at a specific library tile instead of
+// the theme's default art). Returns a plain {id: imageDataUrl} map for
+// convenient lookup, and silently skips any IDs that no longer exist
+// (e.g. a tile was deleted after a scene referenced it) rather than
+// throwing — the engine falls back to default art for those.
+export async function getTilesByIds(ids) {
+  const uniqueIds = [...new Set(ids)].filter(Boolean);
+  if (uniqueIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('tiles')
+    .select('id, image_data_url')
+    .in('id', uniqueIds);
+  if (error) throw error;
+  const map = {};
+  for (const row of data) map[row.id] = row.image_data_url;
+  return map;
+}
+
 export async function saveTile({ name, imageDataUrl }) {
   const { data, error } = await supabase
     .from('tiles')

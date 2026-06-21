@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { getTilesByIds } from '../lib/tiles.js'; // only used by PART 2 below, not by the engine itself
 
 // =====================================================================
 // PART 1: GENERIC HEX-GRID ENGINE — no theme/content assumptions.
@@ -175,6 +176,12 @@ function HexEngine({
   renderOverlay,
   headerTitle,
   headerSubtitle,
+  resolveTiles, // OPTIONAL: async (ids: string[]) => {id: imageDataUrl}.
+                // If provided, called whenever a scene's floor references
+                // tile IDs not yet resolved, to fetch their art from
+                // wherever the config's tile library lives. The engine
+                // itself has no database dependency — this keeps that
+                // generic, same pattern as generateScene.
 }) {
   const [sceneId, setSceneId] = useState(startScene);
   const [scenes, setScenes] = useState(initialScenes);
@@ -182,12 +189,41 @@ function HexEngine({
   const [overlay, setOverlay] = useState(null);
   const [sceneLoading, setSceneLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [resolvedTiles, setResolvedTiles] = useState({}); // {tileId: imageDataUrl}
 
   const scene = scenes[sceneId];
   const floor = floorSet(scene.floor);
   const entities = scene.entities || [];
 
   const T = theme;
+
+  // ---------------- Tile resolution ----------------
+  // Floor cells can be [q, r] (default art) or [q, r, tileId] (a specific
+  // library tile). Whenever the active scene's floor references IDs we
+  // haven't fetched yet, resolve them once and cache the result for the
+  // life of the component — switching scenes back and forth won't re-fetch
+  // tiles already resolved.
+  useEffect(() => {
+    if (!resolveTiles) return;
+    const neededIds = scene.floor
+      .map((cell) => cell[2])
+      .filter((id) => id && !(id in resolvedTiles));
+    if (neededIds.length === 0) return;
+    let cancelled = false;
+    resolveTiles(neededIds)
+      .then((fetched) => {
+        if (cancelled) return;
+        setResolvedTiles((prev) => ({ ...prev, ...fetched }));
+      })
+      .catch(() => {
+        // Resolution failures fall back to default art per-cell at render
+        // time; nothing else to do here.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneId, scene.floor]);
 
   // ---------------- Movement ----------------
 
@@ -284,7 +320,7 @@ function HexEngine({
   const headroom = T.tileHeadroom || 0;
 
   const tiles = scene.floor
-    .map(([q, r]) => ({ q, r }))
+    .map(([q, r, tileId]) => ({ q, r, tileId }))
     .sort((a, b) => a.r - b.r || a.q - b.q);
 
   function isTileOccupied(q, r) {
@@ -317,13 +353,14 @@ function HexEngine({
           {/* the tile in front of it. SVG <image> with data URIs doesn't */}
           {/* render in some sandboxed contexts, hence plain <img> here. */}
           <div style={{ position: "absolute", top: 0, left: 0, width: 640, height: 440 }}>
-            {tiles.map(({ q, r }) => {
+            {tiles.map(({ q, r, tileId }) => {
               const { sx, sy } = hexToScreen(q, r, originX, originY, stepX, stepY);
               const isMarked = isTileOccupied(q, r);
+              const img = (tileId && resolvedTiles[tileId]) || T.tileImg;
               return (
                 <img
                   key={`${q}-${r}`}
-                  src={T.tileImg}
+                  src={img}
                   alt=""
                   style={{
                     position: "absolute",
@@ -755,6 +792,7 @@ export default function WreckAndRuin() {
       generateScene={(sceneId, ctx) =>
         sceneId === "world" ? generateWorldScene(sceneId, ctx) : Promise.resolve({})
       }
+      resolveTiles={getTilesByIds}
       renderOverlay={renderOverlay}
       headerSubtitle="hex D-pad below · walk onto things to interact"
     />

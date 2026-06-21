@@ -129,15 +129,10 @@ export default function MapEditor() {
     };
   }, []);
 
-  const activeTileImg =
-    (activeTileId && tileLibrary.find((t) => t.id === activeTileId)?.image_data_url) || DEFAULT_TILE_IMG;
-
   function cellFromEvent(e) {
     const rect = canvasRef.current.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const sx = clientX - rect.left;
-    const sy = clientY - rect.top;
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
     return screenToHex(sx, sy);
   }
 
@@ -153,8 +148,8 @@ export default function MapEditor() {
       paintedThisStroke.current.add(key);
       setFloor((prev) => {
         const exists = prev.some(([pq, pr]) => hexKey(pq, pr) === key);
-        if (exists) return prev;
-        return [...prev, [q, r]];
+        if (exists) return prev; // existing tiles keep whatever art they were painted with
+        return [...prev, [q, r, activeTileId]];
       });
     } else if (tool === "erase") {
       if (paintedThisStroke.current.has(key)) return;
@@ -184,6 +179,7 @@ export default function MapEditor() {
 
   function handlePointerDown(e) {
     e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     isPainting.current = true;
     paintedThisStroke.current = new Set();
     const { q, r } = cellFromEvent(e);
@@ -197,8 +193,9 @@ export default function MapEditor() {
     applyAt(q, r, false);
   }
 
-  function handlePointerUp() {
+  function handlePointerUp(e) {
     isPainting.current = false;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
   }
 
   function updateSelectedEntity(patch) {
@@ -220,7 +217,12 @@ export default function MapEditor() {
   }
 
   function generateExport() {
-    const floorStr = floor.map(([q, r]) => `[${q},${r}]`).join(",");
+    // Each floor cell is [q, r, tileId]. tileId is null for the default
+    // art, or a string referencing a tile in the shared library — the
+    // game engine resolves these IDs to images at runtime.
+    const floorStr = floor
+      .map(([q, r, tileId]) => `[${q},${r},${tileId ? JSON.stringify(tileId) : "null"}]`)
+      .join(",");
     const entitiesStr = entities
       .map((e) => {
         const fields = [
@@ -277,15 +279,20 @@ ${entitiesStr}
             <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W, height: CANVAS_H, pointerEvents: "none" }}>
               {/* Sorted back-to-front (by r, then q) so tiles painted later */}
               {/* don't draw over the top of tiles that should be in front — */}
-              {/* same depth-sort the actual game engine uses. */}
+              {/* same depth-sort the actual game engine uses. Each cell */}
+              {/* renders with its OWN stored tile art (3rd array element), */}
+              {/* not a single shared image — switching the picker only */}
+              {/* affects new strokes, never repaints existing tiles. */}
               {[...floor]
                 .sort((a, b) => a[1] - b[1] || a[0] - b[0])
-                .map(([q, r]) => {
+                .map(([q, r, tileId]) => {
                   const { sx, sy } = hexToScreen(q, r);
+                  const img =
+                    (tileId && tileLibrary.find((t) => t.id === tileId)?.image_data_url) || DEFAULT_TILE_IMG;
                   return (
                     <img
                       key={hexKey(q, r)}
-                      src={activeTileImg}
+                      src={img}
                       alt=""
                       style={{
                         position: "absolute",
@@ -305,13 +312,11 @@ ${entitiesStr}
               width={CANVAS_W}
               height={CANVAS_H}
               style={{ position: "absolute", top: 0, left: 0, background: "transparent", cursor: "crosshair", touchAction: "none" }}
-              onMouseDown={handlePointerDown}
-              onMouseMove={handlePointerMove}
-              onMouseUp={handlePointerUp}
-              onMouseLeave={handlePointerUp}
-              onTouchStart={handlePointerDown}
-              onTouchMove={handlePointerMove}
-              onTouchEnd={handlePointerUp}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerUp}
+              onPointerCancel={handlePointerUp}
             >
               {entities.map((e) => {
                 const { sx, sy } = hexToScreen(e.q, e.r);
@@ -513,7 +518,9 @@ ${entitiesStr}
       {exportStr && (
         <div style={styles.exportPanel}>
           <div style={styles.exportLabel}>
-            paste this into your SCENES object in the game file (replacing or adding a scene)
+            paste this into your SCENES object in the game file (replacing or adding a scene). Floor
+            cells with a tile ID (not null) require the game engine to fetch that tile from the shared
+            library at runtime — see the engine's tile-resolution code.
           </div>
           <textarea readOnly value={exportStr} style={styles.exportTextarea} onClick={(e) => e.target.select()} />
           <button style={styles.exportBtn} onClick={copyExport}>Copy to clipboard</button>

@@ -283,15 +283,19 @@ export default function HexTileEditor() {
 
   function cellFromEvent(e) {
     const rect = canvasRef.current.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    const x = Math.floor((clientX - rect.left) / ZOOM);
-    const y = Math.floor((clientY - rect.top) / ZOOM);
+    const x = Math.floor((e.clientX - rect.left) / ZOOM);
+    const y = Math.floor((e.clientY - rect.top) / ZOOM);
     return { x, y };
   }
 
+  // Pointer Events (not separate mouse/touch handlers) unify mouse, touch,
+  // and stylus input in one model and respect touch-action more reliably
+  // across browsers — in particular, Safari/iPadOS doesn't always honor
+  // touch-action:none for Apple Pencil input routed through legacy touch
+  // handlers, which let the page scroll mid-stroke. Pointer events fix this.
   function handlePointerDown(e) {
     e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     isDrawing.current = true;
     shadowedThisStroke.current = new Set();
     const { x, y } = cellFromEvent(e);
@@ -303,8 +307,9 @@ export default function HexTileEditor() {
     const { x, y } = cellFromEvent(e);
     applyTool(x, y, false);
   }
-  function handlePointerUp() {
+  function handlePointerUp(e) {
     isDrawing.current = false;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
   }
 
   function undo() {
@@ -402,13 +407,11 @@ export default function HexTileEditor() {
               cursor: "crosshair",
               border: `1px solid ${COLORS.border}`,
             }}
-            onMouseDown={handlePointerDown}
-            onMouseMove={handlePointerMove}
-            onMouseUp={handlePointerUp}
-            onMouseLeave={handlePointerUp}
-            onTouchStart={handlePointerDown}
-            onTouchMove={handlePointerMove}
-            onTouchEnd={handlePointerUp}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+            onPointerCancel={handlePointerUp}
           >
             {/* Mask dimming overlay for cells outside the hex shape */}
             {showMask &&
