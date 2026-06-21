@@ -11,9 +11,9 @@ const HEADROOM_H = 3; // extra space above the top face for tall art (grass, etc
 const TOP_FACE_H = 24;
 const SKIRT_H = 6;
 const GRID_H = HEADROOM_H + TOP_FACE_H + SKIRT_H; // 33
-const ZOOM = 9; // pixels-per-cell on screen — reduced from 12 so the full
-                // editor (canvas + sidebar) fits within a landscape iPad
-                // viewport (~1024px wide) without horizontal scrolling.
+const ZOOM = 16; // pixels-per-cell on screen — sized to actually use the
+                 // available width on a landscape iPad rather than leaving
+                 // most of the screen empty; sidebar widens to match.
 
 // Pointy-top hex mask: which (x,y) cells count as "inside" the top face
 // outline, used both for the drawing guide and to grey out/dim cells
@@ -806,170 +806,170 @@ export default function HexTileEditor() {
         </div>
 
         <div style={styles.sidebar}>
-          <div style={styles.toolRow}>
-            <button
-              style={{ ...styles.toolBtn, ...(tool === "pencil" ? styles.toolBtnActive : {}) }}
-              onClick={() => setTool("pencil")}
-            >
-              Pencil
-            </button>
-            <button
-              style={{ ...styles.toolBtn, ...(tool === "eraser" ? styles.toolBtnActive : {}) }}
-              onClick={() => setTool("eraser")}
-            >
-              Eraser
-            </button>
+          <div style={styles.quickActionsRow}>
+            <button style={styles.quickActionBtn} onClick={undo}>↶ Undo</button>
+            <button style={styles.quickActionBtn} onClick={clearAll}>Clear all</button>
+            <button style={styles.quickActionBtn} onClick={fillMaskOutline}>Fill outline</button>
+            <button style={styles.quickActionBtn} onClick={openLibraryPanel}>Load tile...</button>
           </div>
-          <div style={styles.toolRow}>
-            <button
-              style={{ ...styles.toolBtn, ...(tool === "line" ? styles.toolBtnActive : {}) }}
-              onClick={() => setTool("line")}
-              title="Drag to draw a straight line, release to commit"
-            >
-              Line
-            </button>
-            <button
-              style={{ ...styles.toolBtn, ...(tool === "ellipse" ? styles.toolBtnActive : {}) }}
-              onClick={() => setTool("ellipse")}
-              title="Drag to draw an ellipse outline, squashed to look flat on the tile's surface"
-            >
-              Ellipse
-            </button>
-          </div>
-          <div style={styles.toolRow}>
-            <button
-              style={{ ...styles.toolBtn, ...(tool === "fill" ? styles.toolBtnActive : {}) }}
-              onClick={() => setTool("fill")}
-            >
-              Fill
-            </button>
-            <button
-              style={{ ...styles.toolBtn, ...(tool === "picker" ? styles.toolBtnActive : {}) }}
-              onClick={() => setTool("picker")}
-            >
-              Picker
-            </button>
-          </div>
-          <div style={styles.toolRow}>
-            <button
-              style={{ ...styles.toolBtn, ...(tool === "shadow" ? styles.toolBtnActive : {}) }}
-              onClick={() => setTool("shadow")}
-              title="Darkens existing painted pixels by 25%, capped once per stroke — does nothing on empty cells"
-            >
-              Shadow
-            </button>
-          </div>
-
-          {(tool === "pencil" || tool === "eraser" || tool === "shadow") && (
-            <>
-              <div style={styles.sectionLabel}>brush size</div>
-              <div style={styles.brushSizeRow}>
-                {[1, 2, 3, 4, 6].map((size) => (
-                  <button
-                    key={size}
-                    onClick={() => setBrushSize(size)}
-                    style={{
-                      ...styles.brushSizeBtn,
-                      ...(brushSize === size ? styles.toolBtnActive : {}),
-                    }}
-                  >
-                    {size}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          <div style={styles.sectionLabel}>color</div>
-          {(() => {
-            let offset = 0;
-            return PALETTE_ROW_LABELS.map(({ label, count }) => {
-              const slice = PALETTE.slice(offset, offset + count);
-              offset += count;
-              return (
-                <div key={label} style={{ marginBottom: "6px" }}>
-                  <div style={styles.swatchRowLabel}>{label}</div>
-                  <div style={styles.swatchGrid}>
-                    {slice.map((c, i) => (
-                      <button
-                        key={`${label}-${i}-${c}`}
-                        onClick={() => setColor(c)}
-                        title={c}
-                        style={{
-                          ...styles.swatch,
-                          background: c,
-                          outline: color === c ? `2px solid ${COLORS.brass}` : "1px solid #000",
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              );
-            });
-          })()}
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            style={styles.colorPicker}
-          />
-
-          <div style={styles.sectionLabel}>view</div>
-          <label style={styles.checkRow}>
-            <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />
-            grid lines
-          </label>
-          <label style={styles.checkRow}>
-            <input type="checkbox" checked={showMask} onChange={(e) => setShowMask(e.target.checked)} />
-            dim outside hex
-          </label>
-
-          <div style={styles.sectionLabel}>paint behavior</div>
-          <label style={styles.checkRow}>
-            <input
-              type="checkbox"
-              checked={preserveTransparency}
-              onChange={(e) => setPreserveTransparency(e.target.checked)}
-            />
-            preserve transparency
-          </label>
-          <label style={styles.checkRow}>
-            <input type="checkbox" checked={jitterEnabled} onChange={(e) => setJitterEnabled(e.target.checked)} />
-            randomize color (texture)
-          </label>
-          {jitterEnabled && (
-            <div style={styles.jitterRow}>
-              <input
-                type="range"
-                min="1"
-                max="40"
-                value={jitterAmount}
-                onChange={(e) => setJitterAmount(Number(e.target.value))}
-                style={styles.jitterSlider}
-              />
-              <span style={styles.jitterValue}>{jitterAmount}</span>
+          {loadedTileId && (
+            <div style={styles.editingRow}>
+              <span style={styles.hint}>editing: {tileName || "(unnamed)"}</span>
+              <button style={styles.linkBtn} onClick={startNewTile}>start new</button>
             </div>
           )}
 
-          <div style={styles.sectionLabel}>tile library</div>
-          <button style={styles.actionBtn} onClick={openLibraryPanel}>Load tile...</button>
-          {loadedTileId && (
-            <>
-              <div style={styles.hint}>editing: {tileName || "(unnamed)"}</div>
-              <button style={styles.actionBtn} onClick={startNewTile}>Start new tile</button>
-            </>
-          )}
+          <div style={styles.sidebarColumns}>
+            <div style={styles.sidebarCol}>
+              <div style={styles.sectionLabel}>tool</div>
+              <div style={styles.toolGrid2}>
+                <button
+                  style={{ ...styles.toolBtn, ...(tool === "pencil" ? styles.toolBtnActive : {}) }}
+                  onClick={() => setTool("pencil")}
+                >
+                  Pencil
+                </button>
+                <button
+                  style={{ ...styles.toolBtn, ...(tool === "eraser" ? styles.toolBtnActive : {}) }}
+                  onClick={() => setTool("eraser")}
+                >
+                  Eraser
+                </button>
+                <button
+                  style={{ ...styles.toolBtn, ...(tool === "line" ? styles.toolBtnActive : {}) }}
+                  onClick={() => setTool("line")}
+                  title="Drag to draw a straight line, release to commit"
+                >
+                  Line
+                </button>
+                <button
+                  style={{ ...styles.toolBtn, ...(tool === "ellipse" ? styles.toolBtnActive : {}) }}
+                  onClick={() => setTool("ellipse")}
+                  title="Drag to draw an ellipse outline, squashed to look flat on the tile's surface"
+                >
+                  Ellipse
+                </button>
+                <button
+                  style={{ ...styles.toolBtn, ...(tool === "fill" ? styles.toolBtnActive : {}) }}
+                  onClick={() => setTool("fill")}
+                >
+                  Fill
+                </button>
+                <button
+                  style={{ ...styles.toolBtn, ...(tool === "picker" ? styles.toolBtnActive : {}) }}
+                  onClick={() => setTool("picker")}
+                >
+                  Picker
+                </button>
+                <button
+                  style={{ ...styles.toolBtn, ...(tool === "shadow" ? styles.toolBtnActive : {}), gridColumn: "span 2" }}
+                  onClick={() => setTool("shadow")}
+                  title="Darkens existing painted pixels by 25%, capped once per stroke — does nothing on empty cells"
+                >
+                  Shadow
+                </button>
+              </div>
 
-          <div style={styles.sectionLabel}>actions</div>
-          <button style={styles.actionBtn} onClick={undo}>Undo</button>
-          <button style={styles.actionBtn} onClick={fillMaskOutline}>Fill hex outline</button>
-          <button style={styles.actionBtn} onClick={clearAll}>Clear all</button>
+              {(tool === "pencil" || tool === "eraser" || tool === "shadow") && (
+                <>
+                  <div style={styles.sectionLabel}>brush size</div>
+                  <div style={styles.brushSizeRow}>
+                    {[1, 2, 3, 4, 6].map((size) => (
+                      <button
+                        key={size}
+                        onClick={() => setBrushSize(size)}
+                        style={{
+                          ...styles.brushSizeBtn,
+                          ...(brushSize === size ? styles.toolBtnActive : {}),
+                        }}
+                      >
+                        {size}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
 
-          <div style={styles.sectionLabel}>export</div>
-          <button style={styles.exportBtn} onClick={generateExport}>Generate export</button>
-          {exportImg && !exportPanelOpen && (
-            <button style={styles.actionBtn} onClick={() => setExportPanelOpen(true)}>View last export</button>
-          )}
+              <div style={styles.sectionLabel}>view</div>
+              <label style={styles.checkRow}>
+                <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />
+                grid lines
+              </label>
+              <label style={styles.checkRow}>
+                <input type="checkbox" checked={showMask} onChange={(e) => setShowMask(e.target.checked)} />
+                dim outside hex
+              </label>
+
+              <div style={styles.sectionLabel}>paint behavior</div>
+              <label style={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={preserveTransparency}
+                  onChange={(e) => setPreserveTransparency(e.target.checked)}
+                />
+                preserve transparency
+              </label>
+              <label style={styles.checkRow}>
+                <input type="checkbox" checked={jitterEnabled} onChange={(e) => setJitterEnabled(e.target.checked)} />
+                randomize color (texture)
+              </label>
+              {jitterEnabled && (
+                <div style={styles.jitterRow}>
+                  <input
+                    type="range"
+                    min="1"
+                    max="40"
+                    value={jitterAmount}
+                    onChange={(e) => setJitterAmount(Number(e.target.value))}
+                    style={styles.jitterSlider}
+                  />
+                  <span style={styles.jitterValue}>{jitterAmount}</span>
+                </div>
+              )}
+
+              <div style={styles.sectionLabel}>export</div>
+              <button style={styles.exportBtn} onClick={generateExport}>Generate export</button>
+              {exportImg && !exportPanelOpen && (
+                <button style={styles.actionBtn} onClick={() => setExportPanelOpen(true)}>View last export</button>
+              )}
+            </div>
+
+            <div style={styles.sidebarCol}>
+              <div style={styles.sectionLabel}>color</div>
+              {(() => {
+                let offset = 0;
+                return PALETTE_ROW_LABELS.map(({ label, count }) => {
+                  const slice = PALETTE.slice(offset, offset + count);
+                  offset += count;
+                  return (
+                    <div key={label} style={{ marginBottom: "6px" }}>
+                      <div style={styles.swatchRowLabel}>{label}</div>
+                      <div style={styles.swatchGrid}>
+                        {slice.map((c, i) => (
+                          <button
+                            key={`${label}-${i}-${c}`}
+                            onClick={() => setColor(c)}
+                            title={c}
+                            style={{
+                              ...styles.swatch,
+                              background: c,
+                              outline: color === c ? `2px solid ${COLORS.brass}` : "1px solid #000",
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                style={styles.colorPicker}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1148,12 +1148,52 @@ const styles = {
   sidebar: {
     display: "flex",
     flexDirection: "column",
-    gap: "6px",
-    minWidth: "260px",
-    maxWidth: "260px",
+    gap: "8px",
+    minWidth: "460px",
+    maxWidth: "460px",
   },
-  toolRow: {
+  quickActionsRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, 1fr)",
+    gap: "6px",
+  },
+  quickActionBtn: {
+    background: COLORS.panel,
+    border: `1px solid ${COLORS.brass}`,
+    color: COLORS.brass,
+    padding: "9px 4px",
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "11px",
+    cursor: "pointer",
+  },
+  editingRow: {
     display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: "10px",
+  },
+  linkBtn: {
+    background: "transparent",
+    border: "none",
+    color: COLORS.brass,
+    fontSize: "10px",
+    textDecoration: "underline",
+    cursor: "pointer",
+    padding: 0,
+  },
+  sidebarColumns: {
+    display: "flex",
+    gap: "18px",
+  },
+  sidebarCol: {
+    flex: 1,
+    minWidth: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  toolGrid2: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
     gap: "6px",
   },
   toolBtn: {
