@@ -13,6 +13,10 @@ const FACE_H = TILE_IMG_H - TILE_SKIRT - TILE_HEADROOM;
 const STEP_X = TILE_IMG_W;
 const STEP_Y = FACE_H * 0.75;
 
+// Same tile art the game actually uses, so the editor preview matches
+// reality instead of showing placeholder hexagons.
+const HEX_TILE_IMG = "data:image/png;base64,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";
+
 const CANVAS_W = 640;
 const CANVAS_H = 440;
 const ORIGIN_X = CANVAS_W / 2;
@@ -56,19 +60,6 @@ function cubeRound(q, r) {
   return { q: rx, r: rz };
 }
 
-function hexOutlinePoints(cx, cy, radius) {
-  const pts = [];
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 180) * (60 * i - 30);
-    pts.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]);
-  }
-  return pts;
-}
-
-function pointsToStr(pts) {
-  return pts.map((p) => `${p[0]},${p[1]}`).join(" ");
-}
-
 const ENTITY_KINDS = [
   { value: "casework", label: "Terminal / AI chat", defaultColor: "#8a3324" },
   { value: "info", label: "Info / sign", defaultColor: "#3d4a3a" },
@@ -105,6 +96,12 @@ export default function MapEditor() {
 
   const floorSet = new Set(floor.map(([q, r]) => hexKey(q, r)));
   const selectedEntity = entities.find((e) => e.id === selectedEntityId) || null;
+  const isPainting = useRef(false);
+  // Cells already touched during the current drag stroke, so a single
+  // continuous drag doesn't toggle a tile on-then-off as the pointer
+  // crosses back over it, and so floor placement reads as "paint" not
+  // "click each cell precisely."
+  const paintedThisStroke = useRef(new Set());
 
   function cellFromEvent(e) {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -115,21 +112,31 @@ export default function MapEditor() {
     return screenToHex(sx, sy);
   }
 
-  function handleCanvasClick(e) {
-    const { q, r } = cellFromEvent(e);
+  // Applies the current tool at a given hex. `isStrokeStart` resets the
+  // per-drag dedupe set; called once on pointer-down and again on every
+  // pointer-move while the mouse/touch is held, so floor/erase behave as
+  // continuous painting rather than one cell per click.
+  function applyAt(q, r, isStrokeStart) {
     const key = hexKey(q, r);
 
     if (tool === "floor") {
+      if (paintedThisStroke.current.has(key)) return;
+      paintedThisStroke.current.add(key);
       setFloor((prev) => {
         const exists = prev.some(([pq, pr]) => hexKey(pq, pr) === key);
         if (exists) return prev;
         return [...prev, [q, r]];
       });
     } else if (tool === "erase") {
+      if (paintedThisStroke.current.has(key)) return;
+      paintedThisStroke.current.add(key);
       setFloor((prev) => prev.filter(([pq, pr]) => hexKey(pq, pr) !== key));
       setEntities((prev) => prev.filter((ent) => hexKey(ent.q, ent.r) !== key));
-      if (spawn && hexKey(spawn.q, spawn.r) === key) setSpawn(null);
+      setSpawn((prevSpawn) => (prevSpawn && hexKey(prevSpawn.q, prevSpawn.r) === key ? null : prevSpawn));
     } else if (tool === "entity") {
+      // Single-click only — placing identical entities by dragging would
+      // be more confusing than useful, so this ignores drag-move events.
+      if (!isStrokeStart) return;
       if (!floorSet.has(key)) return;
       const existing = entities.find((ent) => hexKey(ent.q, ent.r) === key);
       if (existing) {
@@ -140,9 +147,29 @@ export default function MapEditor() {
         setSelectedEntityId(newEntity.id);
       }
     } else if (tool === "spawn") {
+      if (!isStrokeStart) return;
       if (!floorSet.has(key)) return;
       setSpawn({ q, r });
     }
+  }
+
+  function handlePointerDown(e) {
+    e.preventDefault();
+    isPainting.current = true;
+    paintedThisStroke.current = new Set();
+    const { q, r } = cellFromEvent(e);
+    applyAt(q, r, true);
+  }
+
+  function handlePointerMove(e) {
+    if (!isPainting.current) return;
+    e.preventDefault();
+    const { q, r } = cellFromEvent(e);
+    applyAt(q, r, false);
+  }
+
+  function handlePointerUp() {
+    isPainting.current = false;
   }
 
   function updateSelectedEntity(patch) {
@@ -208,66 +235,86 @@ ${entitiesStr}
       <style>{fontImports}</style>
       <header style={styles.header}>
         <span style={styles.headerStamp}>MAP EDITOR</span>
-        <span style={styles.headerSub}>click to place floor tiles, then entities on top</span>
+        <span style={styles.headerSub}>drag to paint floor · click to place entities</span>
       </header>
 
       <div style={styles.body}>
         <div style={styles.canvasWrap}>
-          <svg
-            ref={canvasRef}
-            width={CANVAS_W}
-            height={CANVAS_H}
-            style={{ background: "#0c0a08", border: `1px solid ${COLORS.border}`, cursor: "crosshair" }}
-            onClick={handleCanvasClick}
-          >
-            {floor.map(([q, r]) => {
-              const { sx, sy } = hexToScreen(q, r);
-              return (
-                <polygon
-                  key={hexKey(q, r)}
-                  points={pointsToStr(hexOutlinePoints(sx, sy, TILE_IMG_W / 2 - 1))}
-                  fill="#1c1812"
-                  stroke="#3a3225"
-                  strokeWidth="1"
-                />
-              );
-            })}
-
-            {entities.map((e) => {
-              const { sx, sy } = hexToScreen(e.q, e.r);
-              const isSelected = e.id === selectedEntityId;
-              return (
-                <g key={e.id}>
-                  <circle
-                    cx={sx}
-                    cy={sy}
-                    r="9"
-                    fill={e.color}
-                    stroke={isSelected ? COLORS.brass : "#000"}
-                    strokeWidth={isSelected ? 2 : 1}
+          <div style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}` }}>
+            {/* Tile art layer: plain HTML <img> tags (not SVG <image>),
+                since SVG <image> with data URIs doesn't render reliably
+                in some browser contexts — matches the approach used in
+                the actual game engine. */}
+            <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W, height: CANVAS_H, pointerEvents: "none" }}>
+              {floor.map(([q, r]) => {
+                const { sx, sy } = hexToScreen(q, r);
+                return (
+                  <img
+                    key={hexKey(q, r)}
+                    src={HEX_TILE_IMG}
+                    alt=""
+                    style={{
+                      position: "absolute",
+                      left: sx - TILE_IMG_W / 2,
+                      top: sy - FACE_H / 2 - TILE_HEADROOM,
+                      width: TILE_IMG_W,
+                      height: TILE_IMG_H,
+                      imageRendering: "pixelated",
+                    }}
                   />
-                  <text x={sx} y={sy - 16} fontSize="8.5" fill={COLORS.text} textAnchor="middle" fontFamily="monospace">
-                    {e.label}
-                  </text>
-                </g>
-              );
-            })}
+                );
+              })}
+            </div>
 
-            {spawn && (() => {
-              const { sx, sy } = hexToScreen(spawn.q, spawn.r);
-              return (
-                <polygon
-                  key="spawn-marker"
-                  points={`${sx},${sy - 10} ${sx - 7},${sy + 5} ${sx + 7},${sy + 5}`}
-                  fill={COLORS.brass}
-                  opacity="0.9"
-                />
-              );
-            })()}
-          </svg>
+            <svg
+              ref={canvasRef}
+              width={CANVAS_W}
+              height={CANVAS_H}
+              style={{ position: "absolute", top: 0, left: 0, background: "transparent", cursor: "crosshair", touchAction: "none" }}
+              onMouseDown={handlePointerDown}
+              onMouseMove={handlePointerMove}
+              onMouseUp={handlePointerUp}
+              onMouseLeave={handlePointerUp}
+              onTouchStart={handlePointerDown}
+              onTouchMove={handlePointerMove}
+              onTouchEnd={handlePointerUp}
+            >
+              {entities.map((e) => {
+                const { sx, sy } = hexToScreen(e.q, e.r);
+                const isSelected = e.id === selectedEntityId;
+                return (
+                  <g key={e.id}>
+                    <circle
+                      cx={sx}
+                      cy={sy}
+                      r="9"
+                      fill={e.color}
+                      stroke={isSelected ? COLORS.brass : "#000"}
+                      strokeWidth={isSelected ? 2 : 1}
+                    />
+                    <text x={sx} y={sy - 16} fontSize="8.5" fill={COLORS.text} textAnchor="middle" fontFamily="monospace">
+                      {e.label}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {spawn && (() => {
+                const { sx, sy } = hexToScreen(spawn.q, spawn.r);
+                return (
+                  <polygon
+                    key="spawn-marker"
+                    points={`${sx},${sy - 10} ${sx - 7},${sy + 5} ${sx + 7},${sy + 5}`}
+                    fill={COLORS.brass}
+                    opacity="0.9"
+                  />
+                );
+              })()}
+            </svg>
+          </div>
 
           <div style={styles.canvasLabel}>
-            click empty space to add floor (floor tool) · click floor to place/select entity (entity tool)
+            click/drag empty space to paint floor (floor tool) · click floor to place/select entity (entity tool) · erase also supports drag
           </div>
         </div>
 
