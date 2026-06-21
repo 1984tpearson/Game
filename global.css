@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Spectral:ital,wght@0,400;0,600;1,400&family=Space+Mono:wght@400;700&display=swap');
+
+:root {
+  --bg: #0c0a08;
+  --panel: #15120e;
+  --text: #e8dcc4;
+  --text-dim: #9c9078;
+  --accent: #8a3324;
+  --accent2: #3d4a3a;
+  --player: #c4a747;
+  --border: #332c22;
+
+  --font-heading: 'Courier Prime', monospace;
+  --font-body: 'Space Mono', monospace;
+  --font-flavor: 'Spectral', serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+a {
+  color: var(--player);
+}
+
+button {
+  font-family: var(--font-body);
+}
