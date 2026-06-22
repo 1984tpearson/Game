@@ -48,15 +48,23 @@ export function gridToDataUrl(grid, width, height, canvasEl) {
   canvas.height = height;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, width, height);
+  // Use putImageData for pixel-perfect alpha support. ctx.fillStyle with
+  // an 8-digit hex colour is not reliably supported in all browsers, so
+  // we write RGBA bytes directly into an ImageData buffer instead.
+  const imgData = ctx.createImageData(width, height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const c = grid[y][x];
-      if (c) {
-        ctx.fillStyle = c;
-        ctx.fillRect(x, y, 1, 1);
-      }
+      if (!c) continue;
+      const i = (y * width + x) * 4;
+      imgData.data[i]     = parseInt(c.slice(1, 3), 16);
+      imgData.data[i + 1] = parseInt(c.slice(3, 5), 16);
+      imgData.data[i + 2] = parseInt(c.slice(5, 7), 16);
+      // 8-digit hex (#rrggbbaa) carries alpha; 6-digit is fully opaque.
+      imgData.data[i + 3] = c.length === 9 ? parseInt(c.slice(7, 9), 16) : 255;
     }
   }
+  ctx.putImageData(imgData, 0, 0);
   return canvas.toDataURL("image/png");
 }
 
@@ -88,7 +96,14 @@ export function decodeImageToGrid(dataUrl, width, height) {
             const r = pixels[i].toString(16).padStart(2, "0");
             const g = pixels[i + 1].toString(16).padStart(2, "0");
             const b = pixels[i + 2].toString(16).padStart(2, "0");
-            grid[y][x] = `#${r}${g}${b}`;
+            // Preserve partial alpha (e.g. semi-transparent shadow pixels).
+            // Fully opaque pixels stay as 6-digit hex so existing logic is unchanged.
+            if (a === 255) {
+              grid[y][x] = `#${r}${g}${b}`;
+            } else {
+              const aa = a.toString(16).padStart(2, "0");
+              grid[y][x] = `#${r}${g}${b}${aa}`;
+            }
           }
         }
       }

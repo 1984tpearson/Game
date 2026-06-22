@@ -79,6 +79,7 @@ export default function TileEditor() {
   const [showMask, setShowMask] = useState(true);
   const [jitterEnabled, setJitterEnabled] = useState(false);
   const [jitterAmount, setJitterAmount] = useState(12);
+  const [opacity, setOpacity] = useState(100);
   const [preserveTransparency, setPreserveTransparency] = useState(false);
   const [history, setHistory] = useState([]);
   const [exportStr, setExportStr] = useState('');
@@ -107,7 +108,13 @@ export default function TileEditor() {
   function paintCells(g, cells) {
     let next = g;
     for (const { x, y } of cells) {
-      const paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+      let paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+      // If opacity < 100, append the alpha byte to make an 8-digit hex colour.
+      // This only applies to the pencil (paintCells is not called by eraser/shadow).
+      if (opacity < 100) {
+        const a = Math.round((opacity / 100) * 255).toString(16).padStart(2, '0');
+        paintColor = paintColor.slice(0, 7) + a; // strip any existing alpha, add new
+      }
       if (preserveTransparency && (next[y]?.[x] ?? null) === null) continue;
       next = setCell(next, x, y, paintColor, GRID_W, GRID_H);
     }
@@ -308,7 +315,10 @@ export default function TileEditor() {
             ))}
             {grid.map((row, y) => row.map((col, x) =>
               col ? <div key={`c-${x}-${y}`} style={{ ...S.cell, left: x*ZOOM, top: y*ZOOM,
-                background: col, pointerEvents: 'none' }} /> : null
+                background: col.length === 9
+                  ? `rgba(${parseInt(col.slice(1,3),16)},${parseInt(col.slice(3,5),16)},${parseInt(col.slice(5,7),16)},${(parseInt(col.slice(7,9),16)/255).toFixed(3)})`
+                  : col,
+                pointerEvents: 'none' }} /> : null
             ))}
             <div style={{ ...S.guideLine, top: HEADROOM_H*ZOOM, background: C.brass, opacity: 0.45 }} />
             <div style={{ ...S.guideLine, top: (HEADROOM_H+TOP_FACE_H)*ZOOM, background: C.rust, opacity: 0.6 }} />
@@ -342,6 +352,7 @@ export default function TileEditor() {
           showMask={showMask} setShowMask={setShowMask}
           jitterEnabled={jitterEnabled} setJitterEnabled={setJitterEnabled}
           jitterAmount={jitterAmount} setJitterAmount={setJitterAmount}
+          opacity={opacity} setOpacity={setOpacity}
           preserveTransparency={preserveTransparency} setPreserveTransparency={setPreserveTransparency}
           onUndo={undo} onClear={clearAll}
           extraQuickActions={[
@@ -470,6 +481,7 @@ export function PixelSidebar({
   showMask, setShowMask,
   jitterEnabled, setJitterEnabled,
   jitterAmount, setJitterAmount,
+  opacity = 100, setOpacity,
   preserveTransparency, setPreserveTransparency,
   onUndo, onClear,
   extraQuickActions = [],
@@ -519,6 +531,17 @@ export function PixelSidebar({
                   <button key={size} style={{...S.brushSizeBtn, ...(brushSize===size ? S.toolBtnActive : {})}}
                     onClick={() => setBrushSize(size)}>{size}</button>
                 ))}
+              </div>
+            </>
+          )}
+
+          {tool === 'pencil' && setOpacity && (
+            <>
+              <div style={S.sectionLabel}>opacity</div>
+              <div style={S.jitterRow}>
+                <input type="range" min="1" max="100" value={opacity}
+                  onChange={e => setOpacity(Number(e.target.value))} style={S.jitterSlider} />
+                <span style={S.jitterValue}>{opacity}%</span>
               </div>
             </>
           )}

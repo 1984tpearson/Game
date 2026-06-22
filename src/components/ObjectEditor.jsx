@@ -108,6 +108,7 @@ export default function ObjectEditor() {
   const [showGrid, setShowGrid] = useState(true);
   const [jitterEnabled, setJitterEnabled] = useState(false);
   const [jitterAmount, setJitterAmount] = useState(12);
+  const [opacity, setOpacity] = useState(100);
   const [preserveTransparency, setPreserveTransparency] = useState(false);
   const [history, setHistory] = useState([]);
 
@@ -157,7 +158,11 @@ export default function ObjectEditor() {
   function paintCells(g, cells) {
     let next = g;
     for (const { x, y } of cells) {
-      const paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+      let paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+      if (opacity < 100) {
+        const a = Math.round((opacity / 100) * 255).toString(16).padStart(2, '0');
+        paintColor = paintColor.slice(0, 7) + a;
+      }
       if (preserveTransparency && (next[y]?.[x] ?? null) === null) continue;
       next = setCell(next, x, y, paintColor, gridW, gridH);
     }
@@ -417,7 +422,11 @@ export default function ObjectEditor() {
           >
             {grid.map((row, y) => row.map((col, x) =>
               col ? <div key={`c-${x}-${y}`} style={{ position: 'absolute', left: x*ZOOM, top: y*ZOOM,
-                width: ZOOM, height: ZOOM, background: col, pointerEvents: 'none' }} /> : null
+                width: ZOOM, height: ZOOM,
+                background: col.length === 9
+                  ? `rgba(${parseInt(col.slice(1,3),16)},${parseInt(col.slice(3,5),16)},${parseInt(col.slice(5,7),16)},${(parseInt(col.slice(7,9),16)/255).toFixed(3)})`
+                  : col,
+                pointerEvents: 'none' }} /> : null
             ))}
             {showGrid && (
               <svg width={gridW*ZOOM} height={gridH*ZOOM} style={S.gridSvg}>
@@ -446,6 +455,7 @@ export default function ObjectEditor() {
           showMask={false} setShowMask={() => {}}
           jitterEnabled={jitterEnabled} setJitterEnabled={setJitterEnabled}
           jitterAmount={jitterAmount} setJitterAmount={setJitterAmount}
+          opacity={opacity} setOpacity={setOpacity}
           preserveTransparency={preserveTransparency} setPreserveTransparency={setPreserveTransparency}
           onUndo={undo} onClear={clearAll}
           extraQuickActions={[
