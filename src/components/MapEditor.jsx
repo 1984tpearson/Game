@@ -315,12 +315,7 @@ ${entitiesStr}
                 in some browser contexts — matches the approach used in
                 the actual game engine. */}
             <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W, height: CANVAS_H, pointerEvents: "none" }}>
-              {/* Sorted back-to-front (by r, then q) so tiles painted later */}
-              {/* don't draw over the top of tiles that should be in front — */}
-              {/* same depth-sort the actual game engine uses. Each cell */}
-              {/* renders with its OWN stored tile art (3rd array element), */}
-              {/* not a single shared image — switching the picker only */}
-              {/* affects new strokes, never repaints existing tiles. */}
+              {/* Floor tiles — sorted back-to-front */}
               {[...floor]
                 .sort((a, b) => a[1] - b[1] || a[0] - b[0])
                 .map(([q, r, tileId]) => {
@@ -343,6 +338,41 @@ ${entitiesStr}
                     />
                   );
                 })}
+
+              {/* Object images — sorted back-to-front alongside tiles,
+                  anchored so the image bottom sits at the hex face centre.
+                  Only entities that have an objectId get an image here;
+                  the SVG marker layer below shows a circle only when the
+                  entity is selected, so the image is the primary visual. */}
+              {[...entities]
+                .filter(e => e.objectId)
+                .sort((a, b) => a.r - b.r || a.q - b.q)
+                .map(e => {
+                  const obj = objLibrary.find(o => o.id === e.objectId);
+                  if (!obj) return null;
+                  const { sx, sy } = hexToScreen(e.q, e.r);
+                  const scale = 2; // display at 2× pixel size so small sprites are visible
+                  const dispW = obj.width_px * scale;
+                  const dispH = obj.height_px * scale;
+                  const isSelected = e.id === selectedEntityId;
+                  return (
+                    <img
+                      key={`obj-${e.id}`}
+                      src={obj.image_data_url}
+                      alt={e.label}
+                      style={{
+                        position: "absolute",
+                        left: sx - dispW / 2,
+                        top: sy - dispH, // bottom of image sits at anchor hex centre
+                        width: dispW,
+                        height: dispH,
+                        imageRendering: "pixelated",
+                        outline: isSelected ? `2px solid ${COLORS.brass}` : "none",
+                        opacity: isSelected ? 1 : 0.92,
+                      }}
+                    />
+                  );
+                })}
             </div>
 
             <svg
@@ -359,6 +389,10 @@ ${entitiesStr}
               {entities.map((e) => {
                 const { sx, sy } = hexToScreen(e.q, e.r);
                 const isSelected = e.id === selectedEntityId;
+                // Entities with object images: only show the marker circle
+                // when selected (so you can see/click the selection state).
+                // Otherwise the image itself is the visual — no circle on top.
+                if (e.objectId && !isSelected) return null;
                 return (
                   <g key={e.id}>
                     <circle
