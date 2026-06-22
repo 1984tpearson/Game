@@ -455,10 +455,12 @@ ${entitiesStr}
                   const obj = objLibrary.find(o => o.id === e.objectId);
                   if (!obj) return null;
                   const { sx, sy } = hexToScreen(e.q, e.r);
-                  const scale = 1; // 1:1 with tile pixels — no extra scaling needed since
-                                   // object art is already sized relative to the tile grid
-                  const dispW = obj.width_px * scale;
-                  const dispH = obj.height_px * scale;
+                  // Also apply the floor tile's yOffset at this position so
+                  // objects sit correctly on raised or lowered tiles.
+                  const floorCell = floor.find(([fq, fr]) => fq === e.q && fr === e.r);
+                  const floorYOffset = floorCell ? (floorCell[3] ?? 0) : 0;
+                  const dispW = obj.width_px;
+                  const dispH = obj.height_px;
                   const isSelected = e.id === selectedEntityId;
                   return (
                     <img
@@ -468,7 +470,7 @@ ${entitiesStr}
                       style={{
                         position: "absolute",
                         left: sx - dispW / 2,
-                        top: sy - dispH + 6, // +6px nudge so object sits on the tile surface
+                        top: sy - dispH + 6 + floorYOffset,
                         width: dispW,
                         height: dispH,
                         imageRendering: "pixelated",
@@ -572,7 +574,10 @@ ${entitiesStr}
             <div style={styles.tilePickerGrid}>
               <button
                 key="default"
-                onClick={() => setActiveTileId(null)}
+                onClick={() => {
+                    setActiveTileId(null);
+                    setTileYOffset(0);
+                  }}
                 title="default"
                 style={{
                   ...styles.tileSwatchBtn,
@@ -584,7 +589,10 @@ ${entitiesStr}
               {tileLibrary.map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => setActiveTileId(t.id)}
+                  onClick={() => {
+                    setActiveTileId(t.id);
+                    setTileYOffset(t.default_y_offset ?? 0);
+                  }}
                   title={t.name}
                   style={{
                     ...styles.tileSwatchBtn,

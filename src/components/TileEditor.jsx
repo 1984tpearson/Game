@@ -84,6 +84,7 @@ export default function TileEditor() {
   const [exportStr, setExportStr] = useState('');
   const [exportImg, setExportImg] = useState(null);
   const [tileName, setTileName] = useState('');
+  const [tileDefaultYOffset, setTileDefaultYOffset] = useState(0); // -6 | 0 | 6
   const [saveStatus, setSaveStatus] = useState(null);
   const [saveError, setSaveError] = useState(null);
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
@@ -239,9 +240,9 @@ export default function TileEditor() {
     setSaveStatus('saving'); setSaveError(null);
     try {
       if (loadedTileId && !forceNew) {
-        await updateTile(loadedTileId, { name: tileName.trim(), imageDataUrl: exportImg });
+        await updateTile(loadedTileId, { name: tileName.trim(), imageDataUrl: exportImg, defaultYOffset: tileDefaultYOffset });
       } else {
-        const created = await saveTile({ name: tileName.trim(), imageDataUrl: exportImg });
+        const created = await saveTile({ name: tileName.trim(), imageDataUrl: exportImg, defaultYOffset: tileDefaultYOffset });
         setLoadedTileId(created.id);
       }
       setSaveStatus('saved');
@@ -263,6 +264,7 @@ export default function TileEditor() {
       setGrid(decoded);
       setLoadedTileId(tile.id);
       setTileName(tile.name);
+      setTileDefaultYOffset(tile.default_y_offset ?? 0);
       setLibraryPanelOpen(false);
       setExportImg(null); setExportStr(''); setSaveStatus(null);
     } catch (e) { setTileLibraryError(e.message || 'Failed to load tile.'); }
@@ -272,7 +274,7 @@ export default function TileEditor() {
   function startNew() {
     pushHistory(grid);
     setGrid(makeBlankGrid(GRID_W, GRID_H));
-    setLoadedTileId(null); setTileName('');
+    setLoadedTileId(null); setTileName(''); setTileDefaultYOffset(0);
     setExportImg(null); setExportStr(''); setSaveStatus(null);
   }
 
@@ -369,6 +371,18 @@ export default function TileEditor() {
           <input style={S.textInput} value={tileName}
             onChange={e => { setTileName(e.target.value); setSaveStatus(null); }}
             placeholder="tile name (e.g. mossy stone)" />
+          <div style={S.sectionLabel}>default height when placed in map editor</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[[-6, '▲ raise +6'], [0, '— default'], [6, '▼ lower +6']].map(([val, label]) => (
+              <button
+                key={val}
+                style={{ ...S.toolBtn, flex: 1, ...(tileDefaultYOffset === val ? S.toolBtnActive : {}) }}
+                onClick={() => setTileDefaultYOffset(val)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button style={S.exportBtn} onClick={() => saveToLibrary(false)} disabled={saveStatus==='saving'}>
             {saveStatus==='saving' ? 'Saving…' : loadedTileId ? 'Update tile' : 'Save to library'}
           </button>

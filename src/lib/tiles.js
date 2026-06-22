@@ -7,7 +7,7 @@ import { supabase } from './supabase.js';
 export async function listTiles() {
   const { data, error } = await supabase
     .from('tiles')
-    .select('id, name, image_data_url, created_at, updated_at')
+    .select('id, name, image_data_url, default_y_offset, created_at, updated_at')
     .order('updated_at', { ascending: false });
   if (error) throw error;
   return data;
@@ -33,20 +33,21 @@ export async function getTilesByIds(ids) {
   return map;
 }
 
-export async function saveTile({ name, imageDataUrl }) {
+export async function saveTile({ name, imageDataUrl, defaultYOffset = 0 }) {
   const { data, error } = await supabase
     .from('tiles')
-    .insert({ name, image_data_url: imageDataUrl })
+    .insert({ name, image_data_url: imageDataUrl, default_y_offset: defaultYOffset })
     .select()
     .single();
   if (error) throw error;
   return data;
 }
 
-export async function updateTile(id, { name, imageDataUrl }) {
+export async function updateTile(id, { name, imageDataUrl, defaultYOffset }) {
   const patch = { updated_at: new Date().toISOString() };
   if (name !== undefined) patch.name = name;
   if (imageDataUrl !== undefined) patch.image_data_url = imageDataUrl;
+  if (defaultYOffset !== undefined) patch.default_y_offset = defaultYOffset;
   const { data, error } = await supabase
     .from('tiles')
     .update(patch)
