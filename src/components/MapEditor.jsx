@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { listTiles } from '../lib/tiles.js';
 import { listObjects } from '../lib/objects.js';
+import { listMaps, loadMap, saveMap, updateMap } from '../lib/maps.js';
 
 // =================================================================
 // Matches the game engine's hex geometry: pointy-top axial coords,
@@ -95,6 +96,15 @@ export default function MapEditor() {
   const [sceneId, setSceneId] = useState("scene_1");
   const [exportStr, setExportStr] = useState("");
   const canvasRef = useRef(null);
+
+  // Map save/load state
+  const [loadedMapId, setLoadedMapId] = useState(null);
+  const [mapSaveStatus, setMapSaveStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
+  const [mapSaveError, setMapSaveError] = useState(null);
+  const [mapLibrary, setMapLibrary] = useState([]);
+  const [mapLibraryLoading, setMapLibraryLoading] = useState(false);
+  const [mapLibraryError, setMapLibraryError] = useState(null);
+  const [loadPanelOpen, setLoadPanelOpen] = useState(false);
 
   const floorSet = new Set(floor.map(([q, r]) => hexKey(q, r)));
   const selectedEntity = entities.find((e) => e.id === selectedEntityId) || null;
@@ -299,13 +309,105 @@ ${entitiesStr}
     navigator.clipboard?.writeText(exportStr);
   }
 
+  // ---------------- Map save / load ----------------
+
+  async function saveCurrentMap(forceNew = false) {
+    setMapSaveStatus('saving');
+    setMapSaveError(null);
+    try {
+      const payload = {
+        name: sceneName,
+        sceneId,
+        floor,
+        entities,
+        spawn,
+      };
+      if (loadedMapId && !forceNew) {
+        await updateMap(loadedMapId, payload);
+      } else {
+        const created = await saveMap(payload);
+        setLoadedMapId(created.id);
+      }
+      setMapSaveStatus('saved');
+    } catch (e) {
+      setMapSaveStatus('error');
+      setMapSaveError(e.message || 'Save failed.');
+    }
+  }
+
+  async function openLoadPanel() {
+    setLoadPanelOpen(true);
+    setMapLibraryLoading(true);
+    setMapLibraryError(null);
+    try {
+      setMapLibrary(await listMaps());
+    } catch (e) {
+      setMapLibraryError(e.message || 'Failed to load maps.');
+    } finally {
+      setMapLibraryLoading(false);
+    }
+  }
+
+  async function loadMapFromLibrary(mapRow) {
+    try {
+      const full = await loadMap(mapRow.id);
+      setFloor(full.floor || []);
+      setEntities(full.entities || []);
+      setSpawn(full.spawn || null);
+      setSceneName(full.name);
+      setSceneId(full.scene_id);
+      setLoadedMapId(full.id);
+      setSelectedEntityId(null);
+      setExportStr('');
+      setMapSaveStatus(null);
+      setLoadPanelOpen(false);
+    } catch (e) {
+      setMapLibraryError(e.message || 'Failed to load map.');
+    }
+  }
+
+  function newMap() {
+    setFloor([]);
+    setEntities([]);
+    setSpawn(null);
+    setSceneName('New Scene');
+    setSceneId('scene_1');
+    setLoadedMapId(null);
+    setSelectedEntityId(null);
+    setExportStr('');
+    setMapSaveStatus(null);
+  }
+
   return (
     <div style={styles.root}>
       <style>{fontImports}</style>
       <header style={styles.header}>
         <span style={styles.headerStamp}>MAP EDITOR</span>
+        <div style={styles.headerActions}>
+          {loadedMapId && (
+            <span style={styles.headerSavedName}>{sceneName}</span>
+          )}
+          <button style={styles.headerBtn} onClick={newMap}>New</button>
+          <button style={styles.headerBtn} onClick={openLoadPanel}>Load…</button>
+          <button
+            style={{ ...styles.headerBtn, ...styles.headerBtnPrimary }}
+            onClick={() => saveCurrentMap(false)}
+            disabled={mapSaveStatus === 'saving'}
+          >
+            {mapSaveStatus === 'saving' ? 'Saving…' : loadedMapId ? 'Save' : 'Save as new'}
+          </button>
+          {loadedMapId && (
+            <button style={styles.headerBtn} onClick={() => saveCurrentMap(true)}>Save as new</button>
+          )}
+        </div>
         <span style={styles.headerSub}>drag to paint floor · click to place entities</span>
       </header>
+      {mapSaveStatus === 'saved' && (
+        <div style={styles.saveConfirm}>saved — {new Date().toLocaleTimeString()}</div>
+      )}
+      {mapSaveStatus === 'error' && (
+        <div style={{ ...styles.saveConfirm, color: COLORS.rust }}>{mapSaveError}</div>
+      )}
 
       <div style={styles.body}>
         <div style={styles.canvasWrap}>
@@ -364,7 +466,7 @@ ${entitiesStr}
                       style={{
                         position: "absolute",
                         left: sx - dispW / 2,
-                        top: sy - dispH, // bottom of image sits at anchor hex centre
+                        top: sy - dispH + 6, // +6px nudge so object sits on the tile surface
                         width: dispW,
                         height: dispH,
                         imageRendering: "pixelated",
@@ -637,6 +739,33 @@ ${entitiesStr}
           <button style={styles.exportBtn} onClick={copyExport}>Copy to clipboard</button>
         </div>
       )}
+
+      {/* Load map panel */}
+      {loadPanelOpen && (
+        <div style={styles.loadOverlay} onClick={() => setLoadPanelOpen(false)}>
+          <div style={styles.loadPanel} onClick={e => e.stopPropagation()}>
+            <div style={styles.loadPanelHeader}>
+              <span>LOAD MAP</span>
+              <button style={styles.loadCloseBtn} onClick={() => setLoadPanelOpen(false)}>×</button>
+            </div>
+            <div style={styles.loadPanelBody}>
+              {mapLibraryLoading && <div style={styles.hint}>loading…</div>}
+              {mapLibraryError && <div style={{ ...styles.hint, color: COLORS.rust }}>{mapLibraryError}</div>}
+              {!mapLibraryLoading && !mapLibraryError && mapLibrary.length === 0 && (
+                <div style={styles.hint}>no saved maps yet</div>
+              )}
+              {mapLibrary.map(m => (
+                <button key={m.id} style={styles.mapListItem} onClick={() => loadMapFromLibrary(m)}>
+                  <span style={styles.mapListName}>{m.name}</span>
+                  <span style={styles.mapListMeta}>
+                    {m.scene_id} · {new Date(m.updated_at).toLocaleDateString()}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -669,8 +798,107 @@ const styles = {
     borderBottom: `1px solid ${COLORS.border}`,
     display: "flex",
     justifyContent: "space-between",
+    alignItems: "center",
     flexWrap: "wrap",
+    gap: "8px",
+  },
+  headerActions: {
+    display: "flex",
     gap: "6px",
+    alignItems: "center",
+  },
+  headerSavedName: {
+    fontSize: "11px",
+    color: COLORS.textDim,
+    fontStyle: "italic",
+    marginRight: "4px",
+  },
+  headerBtn: {
+    background: COLORS.panel,
+    border: `1px solid ${COLORS.border}`,
+    color: COLORS.text,
+    padding: "6px 12px",
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "11px",
+    cursor: "pointer",
+  },
+  headerBtnPrimary: {
+    background: COLORS.rust,
+    border: `1px solid ${COLORS.rust}`,
+    color: COLORS.text,
+  },
+  saveConfirm: {
+    padding: "4px 18px",
+    fontSize: "10px",
+    color: COLORS.brass,
+    background: COLORS.panel,
+    borderBottom: `1px solid ${COLORS.border}`,
+  },
+  loadOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.7)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
+  loadPanel: {
+    background: COLORS.bg,
+    border: `1px solid ${COLORS.brass}`,
+    width: "420px",
+    maxHeight: "70vh",
+    display: "flex",
+    flexDirection: "column",
+  },
+  loadPanelHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "10px 14px",
+    borderBottom: `1px solid ${COLORS.border}`,
+    fontSize: "12px",
+    fontWeight: 700,
+    color: COLORS.brass,
+    letterSpacing: "0.08em",
+  },
+  loadCloseBtn: {
+    background: "transparent",
+    border: "none",
+    color: COLORS.text,
+    fontSize: "18px",
+    cursor: "pointer",
+    lineHeight: 1,
+  },
+  loadPanelBody: {
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    padding: "8px",
+    gap: "4px",
+  },
+  mapListItem: {
+    background: COLORS.panel,
+    border: `1px solid ${COLORS.border}`,
+    color: COLORS.text,
+    padding: "10px 12px",
+    cursor: "pointer",
+    textAlign: "left",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+  },
+  mapListName: {
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "12px",
+    color: COLORS.text,
+  },
+  mapListMeta: {
+    fontFamily: "'Space Mono', monospace",
+    fontSize: "9px",
+    color: COLORS.textDim,
+    whiteSpace: "nowrap",
   },
   headerStamp: {
     fontFamily: "'Courier Prime', monospace",
