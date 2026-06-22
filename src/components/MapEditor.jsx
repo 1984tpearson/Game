@@ -448,7 +448,7 @@ ${entitiesStr}
                   entity is selected, so the image is the primary visual. */}
               {[...entities]
                 .filter(e => e.objectId)
-                .sort((a, b) => a.r - b.r || a.q - b.q)
+                .sort((a, b) => a.r - b.r || b.q - a.q)
                 .map(e => {
                   const obj = objLibrary.find(o => o.id === e.objectId);
                   if (!obj) return null;
