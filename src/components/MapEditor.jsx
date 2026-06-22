@@ -415,7 +415,7 @@ ${entitiesStr}
             <button style={{ ...styles.toolBtn, ...(tool === "floor" ? styles.toolBtnActive : {}) }} onClick={() => setTool("floor")}>
               Floor
             </button>
-            <button style={{ ...styles.toolBtn, ...(tool === "entity" ? styles.toolBtnActive : {}) }} onClick={() => setTool("entity")}>
+            <button style={{ ...styles.toolBtn, ...(tool === "entity" ? styles.toolBtnActive : {}) }} onClick={() => { setTool("entity"); setObjSubTool('manual'); setActiveObjectId(null); }}>
               Entity
             </button>
             <button style={{ ...styles.toolBtn, ...(tool === "spawn" ? styles.toolBtnActive : {}) }} onClick={() => setTool("spawn")}>
@@ -468,7 +468,7 @@ ${entitiesStr}
               Manual
             </button>
             <button style={{ ...styles.toolBtn, ...(objSubTool === 'library' ? styles.toolBtnActive : {}) }}
-              onClick={() => setObjSubTool('library')}>
+              onClick={() => { setObjSubTool('library'); setTool('entity'); }}>
               From library
             </button>
           </div>
@@ -481,18 +481,21 @@ ${entitiesStr}
               )}
               <div style={styles.tilePickerGrid}>
                 {objLibrary.map((obj) => (
-                  <button key={obj.id} onClick={() => setActiveObjectId(obj.id)} title={obj.name}
+                  <button key={obj.id}
+                    onClick={() => { setActiveObjectId(obj.id); setTool('entity'); }}
+                    title={obj.name}
                     style={{ ...styles.tileSwatchBtn,
                       outline: activeObjectId === obj.id ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}` }}>
                     <img src={obj.image_data_url} alt={obj.name} style={styles.tileSwatchImg} />
                   </button>
                 ))}
               </div>
-              {activeObjectId && (
-                <div style={styles.hint}>
-                  selected: {objLibrary.find(o => o.id === activeObjectId)?.name || ''} — click a floor tile to place
-                </div>
-              )}
+              {activeObjectId
+                ? <div style={styles.hint}>
+                    ✓ {objLibrary.find(o => o.id === activeObjectId)?.name} selected — make sure Entity tool is active, then click a floor tile
+                  </div>
+                : <div style={styles.hint}>pick an object above, then click a floor tile to place it</div>
+              }
             </>
           )}
 
