@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { listTiles } from '../lib/tiles.js';
+import { listObjects } from '../lib/objects.js';
 
 // =================================================================
 // Matches the game engine's hex geometry: pointy-top axial coords,
@@ -112,21 +113,26 @@ export default function MapEditor() {
   const [tileLibraryError, setTileLibraryError] = useState(null);
   const [activeTileId, setActiveTileId] = useState(null); // null = use DEFAULT_TILE_IMG
 
+  // Object library: objects saved from the Pixel Editor (object mode).
+  // activeObjectId = the object from the library that will be placed when
+  // the "Object" sub-tool is active; null means manual entity placement.
+  const [objLibrary, setObjLibrary] = useState([]);
+  const [objLibraryLoading, setObjLibraryLoading] = useState(true);
+  const [objLibraryError, setObjLibraryError] = useState(null);
+  const [activeObjectId, setActiveObjectId] = useState(null);
+  const [objSubTool, setObjSubTool] = useState('manual'); // 'manual' | 'library'
+
   useEffect(() => {
     let cancelled = false;
     listTiles()
-      .then((tiles) => {
-        if (!cancelled) setTileLibrary(tiles);
-      })
-      .catch((e) => {
-        if (!cancelled) setTileLibraryError(e.message || "Failed to load tile library.");
-      })
-      .finally(() => {
-        if (!cancelled) setTileLibraryLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .then((tiles) => { if (!cancelled) setTileLibrary(tiles); })
+      .catch((e) => { if (!cancelled) setTileLibraryError(e.message || 'Failed to load tile library.'); })
+      .finally(() => { if (!cancelled) setTileLibraryLoading(false); });
+    listObjects()
+      .then((objs) => { if (!cancelled) setObjLibrary(objs); })
+      .catch((e) => { if (!cancelled) setObjLibraryError(e.message || 'Failed to load object library.'); })
+      .finally(() => { if (!cancelled) setObjLibraryLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   function cellFromEvent(e) {
@@ -173,6 +179,27 @@ export default function MapEditor() {
       const existing = entities.find((ent) => hexKey(ent.q, ent.r) === key);
       if (existing) {
         setSelectedEntityId(existing.id);
+      } else if (objSubTool === 'library' && activeObjectId) {
+        // Placing a library object: auto-create an entity pre-filled with
+        // the object's defaults, footprint, and a reference to the object
+        // library ID so the game engine can fetch its art at runtime.
+        const obj = objLibrary.find(o => o.id === activeObjectId);
+        if (!obj) return;
+        const newEntity = {
+          q, r,
+          id: `entity-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          label: obj.name,
+          color: '#9c6e30',
+          kind: obj.default_kind || 'object',
+          trigger: obj.default_trigger || null,
+          blocksMovement: obj.default_blocks_movement || false,
+          footprint: obj.footprint || [[0, 0]],
+          objectId: obj.id, // game engine resolves this to the actual image at runtime
+          text: '',
+          toScene: '',
+        };
+        setEntities((prev) => [...prev, newEntity]);
+        setSelectedEntityId(newEntity.id);
       } else {
         const newEntity = makeEmptyEntity(q, r);
         setEntities((prev) => [...prev, newEntity]);
@@ -244,6 +271,9 @@ export default function MapEditor() {
           `blocksMovement: ${e.blocksMovement}`,
         ];
         if (e.kind === "info" && e.text) fields.push(`text: ${JSON.stringify(e.text)}`);
+        if (e.footprint && !(e.footprint.length === 1 && e.footprint[0][0] === 0 && e.footprint[0][1] === 0))
+          fields.push(`footprint: ${JSON.stringify(e.footprint)}`);
+        if (e.objectId) fields.push(`objectId: ${JSON.stringify(e.objectId)}`);
         if (e.kind === "exit") {
           fields.push(`toScene: ${JSON.stringify(e.toScene || "")}`);
           fields.push(`spawn: { q: 0, r: 0 } /* TODO: set real spawn point in target scene */`);
@@ -428,7 +458,42 @@ ${entitiesStr}
             </div>
           )}
           {!tileLibraryLoading && !tileLibraryError && tileLibrary.length === 0 && (
-            <div style={styles.hint}>no saved tiles yet — make one in the Tile Fabricator</div>
+            <div style={styles.hint}>no saved tiles yet — make one in the Pixel Editor</div>
+          )}
+
+          <div style={styles.sectionLabel}>place object</div>
+          <div style={styles.toolGrid}>
+            <button style={{ ...styles.toolBtn, ...(objSubTool === 'manual' ? styles.toolBtnActive : {}) }}
+              onClick={() => { setObjSubTool('manual'); setActiveObjectId(null); }}>
+              Manual
+            </button>
+            <button style={{ ...styles.toolBtn, ...(objSubTool === 'library' ? styles.toolBtnActive : {}) }}
+              onClick={() => setObjSubTool('library')}>
+              From library
+            </button>
+          </div>
+          {objSubTool === 'library' && (
+            <>
+              {objLibraryLoading && <div style={styles.hint}>loading objects...</div>}
+              {objLibraryError && <div style={{ ...styles.hint, color: COLORS.rust }}>{objLibraryError}</div>}
+              {!objLibraryLoading && objLibrary.length === 0 && (
+                <div style={styles.hint}>no saved objects yet — make one in the Pixel Editor (Object mode)</div>
+              )}
+              <div style={styles.tilePickerGrid}>
+                {objLibrary.map((obj) => (
+                  <button key={obj.id} onClick={() => setActiveObjectId(obj.id)} title={obj.name}
+                    style={{ ...styles.tileSwatchBtn,
+                      outline: activeObjectId === obj.id ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}` }}>
+                    <img src={obj.image_data_url} alt={obj.name} style={styles.tileSwatchImg} />
+                  </button>
+                ))}
+              </div>
+              {activeObjectId && (
+                <div style={styles.hint}>
+                  selected: {objLibrary.find(o => o.id === activeObjectId)?.name || ''} — click a floor tile to place
+                </div>
+              )}
+            </>
           )}
 
           {selectedEntity && (

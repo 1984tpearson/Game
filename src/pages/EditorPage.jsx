@@ -1,17 +1,33 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import TileEditor from '../components/TileEditor.jsx';
+import ObjectEditor from '../components/ObjectEditor.jsx';
 
 export default function EditorPage() {
+  const [mode, setMode] = useState('tile'); // 'tile' | 'object'
+
   return (
     <div style={styles.root}>
       <div style={styles.topBar}>
         <Link to="/" style={styles.backLink}>← back</Link>
+        <div style={styles.modeRow}>
+          <button
+            style={{ ...styles.modeBtn, ...(mode === 'tile' ? styles.modeBtnActive : {}) }}
+            onClick={() => setMode('tile')}
+          >
+            Tiles
+          </button>
+          <button
+            style={{ ...styles.modeBtn, ...(mode === 'object' ? styles.modeBtnActive : {}) }}
+            onClick={() => setMode('object')}
+          >
+            Objects
+          </button>
+        </div>
         <Link to="/map-editor" style={styles.navLink}>map editor</Link>
-        <Link to="/game" style={styles.navLink}>play game →</Link>
       </div>
       <div style={styles.editorWrap}>
-        <TileEditor />
+        {mode === 'tile' ? <TileEditor /> : <ObjectEditor />}
       </div>
     </div>
   );
@@ -30,6 +46,7 @@ const styles = {
     maxWidth: '1200px',
     display: 'flex',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: '14px',
     fontSize: '12px',
     fontFamily: 'var(--font-body)',
@@ -39,8 +56,25 @@ const styles = {
     textDecoration: 'none',
   },
   navLink: {
-    color: 'var(--accent2)',
+    color: 'var(--text-dim)',
     textDecoration: 'none',
+  },
+  modeRow: {
+    display: 'flex',
+    gap: '6px',
+  },
+  modeBtn: {
+    background: 'var(--panel)',
+    border: '1px solid var(--border)',
+    color: 'var(--text-dim)',
+    padding: '6px 16px',
+    fontFamily: 'var(--font-body)',
+    fontSize: '12px',
+    cursor: 'pointer',
+  },
+  modeBtnActive: {
+    color: 'var(--player)',
+    borderColor: 'var(--player)',
   },
   editorWrap: {
     width: '100%',
