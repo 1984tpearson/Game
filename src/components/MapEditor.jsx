@@ -351,7 +351,8 @@ ${entitiesStr}
                   const obj = objLibrary.find(o => o.id === e.objectId);
                   if (!obj) return null;
                   const { sx, sy } = hexToScreen(e.q, e.r);
-                  const scale = 2; // display at 2× pixel size so small sprites are visible
+                  const scale = 1; // 1:1 with tile pixels — no extra scaling needed since
+                                   // object art is already sized relative to the tile grid
                   const dispW = obj.width_px * scale;
                   const dispH = obj.height_px * scale;
                   const isSelected = e.id === selectedEntityId;
