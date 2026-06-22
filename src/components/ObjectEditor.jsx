@@ -135,6 +135,8 @@ export default function ObjectEditor() {
   const [shapePreview, setShapePreview] = useState(null);
   const canvasRef = useRef(null);
   const exportCanvasRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const [importError, setImportError] = useState(null);
 
   const pushHistory = useCallback((g) => setHistory((h) => [...h.slice(-19), g]), []);
 
@@ -333,6 +335,57 @@ export default function ObjectEditor() {
     setExportImg(null); setSaveStatus(null);
   }
 
+  // Import a PNG from disk (e.g. exported from PixelLab, Aseprite, etc.)
+  // Reads the image's natural pixel dimensions and sizes the canvas to
+  // match automatically, so no manual resize step is needed.
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    if (!fileInputRef.current) return;
+    fileInputRef.current.value = ''; // reset so the same file can be re-selected
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setImportError('Please select a PNG image file.');
+      return;
+    }
+    setImportError(null);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const dataUrl = ev.target.result;
+      // Read the image's actual pixel dimensions first, before decoding
+      // the grid — object mode respects the source art's real size rather
+      // than forcing it into a fixed canvas like tile mode does.
+      const img = new Image();
+      img.onload = async () => {
+        const w = Math.min(img.naturalWidth, 200);
+        const h = Math.min(img.naturalHeight, 400);
+        if (w !== img.naturalWidth || h !== img.naturalHeight) {
+          setImportError(`Image was ${img.naturalWidth}×${img.naturalHeight}px — clamped to ${w}×${h} (max 200×400). Consider downscaling in PixelLab first.`);
+        }
+        try {
+          const decoded = await decodeImageToGrid(dataUrl, w, h);
+          pushHistory(grid);
+          setGrid(decoded);
+          setGridW(w); setGridH(h);
+          setObjW(w); setObjH(h);
+          // Clear any loaded-object tracking — this is new art, not a
+          // library object being edited, even if we later save it there.
+          setLoadedObjId(null);
+          setExportImg(null); setSaveStatus(null);
+          // Pre-fill the name from the filename if none set yet
+          if (!objName.trim()) {
+            const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ');
+            setObjName(baseName);
+          }
+        } catch (err) {
+          setImportError('Failed to decode image. Make sure it\'s a valid PNG with transparent background.');
+        }
+      };
+      img.onerror = () => setImportError('Could not load image file.');
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
+
   const canvasStyle = {
     position: 'relative',
     width: gridW * ZOOM,
@@ -406,6 +459,24 @@ export default function ObjectEditor() {
           hideMaskToggle
           extraTopControls={
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={S.sectionLabel}>import PNG</div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button style={S.exportBtn} onClick={() => fileInputRef.current?.click()}>
+                  Import PNG from PixelLab…
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/*"
+                  style={{ display: 'none' }}
+                  onChange={handleImportFile}
+                />
+              </div>
+              {importError && <div style={{ ...S.hint, color: C.rust }}>{importError}</div>}
+              <div style={{ ...S.hint }}>
+                saves at original pixel dimensions — canvas auto-resizes to match
+              </div>
+
               <div style={S.sectionLabel}>canvas size</div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <input type="number" min="1" max="200" value={objW}
