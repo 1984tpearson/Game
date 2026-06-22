@@ -320,7 +320,7 @@ function HexEngine({
   const headroom = T.tileHeadroom || 0;
 
   const tiles = scene.floor
-    .map(([q, r, tileId]) => ({ q, r, tileId }))
+    .map(([q, r, tileId, yOffset]) => ({ q, r, tileId, yOffset: yOffset ?? 0 }))
     .sort((a, b) => a.r - b.r || a.q - b.q);
 
   function isTileOccupied(q, r) {
@@ -353,7 +353,7 @@ function HexEngine({
           {/* the tile in front of it. SVG <image> with data URIs doesn't */}
           {/* render in some sandboxed contexts, hence plain <img> here. */}
           <div style={{ position: "absolute", top: 0, left: 0, width: 640, height: 440 }}>
-            {tiles.map(({ q, r, tileId }) => {
+            {tiles.map(({ q, r, tileId, yOffset }) => {
               const { sx, sy } = hexToScreen(q, r, originX, originY, stepX, stepY);
               const isMarked = isTileOccupied(q, r);
               const img = (tileId && resolvedTiles[tileId]) || T.tileImg;
@@ -365,7 +365,7 @@ function HexEngine({
                   style={{
                     position: "absolute",
                     left: sx - T.tileImgW / 2,
-                    top: sy - faceH / 2 - headroom,
+                    top: sy - faceH / 2 - headroom + yOffset,
                     width: T.tileImgW,
                     height: T.tileImgH,
                     opacity: isMarked ? 1 : 0.88,

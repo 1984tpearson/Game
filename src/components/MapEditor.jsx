@@ -122,6 +122,7 @@ export default function MapEditor() {
   const [tileLibraryLoading, setTileLibraryLoading] = useState(true);
   const [tileLibraryError, setTileLibraryError] = useState(null);
   const [activeTileId, setActiveTileId] = useState(null); // null = use DEFAULT_TILE_IMG
+  const [tileYOffset, setTileYOffset] = useState(0); // -6 | 0 | +6
 
   // Object library: objects saved from the Pixel Editor (object mode).
   // activeObjectId = the object from the library that will be placed when
@@ -164,15 +165,10 @@ export default function MapEditor() {
       paintedThisStroke.current.add(key);
       setFloor((prev) => {
         const idx = prev.findIndex(([pq, pr]) => hexKey(pq, pr) === key);
-        if (idx === -1) return [...prev, [q, r, activeTileId]];
-        // Cell already has a tile — repaint it with whichever tile is
-        // currently active. This only happens when the user actively
-        // paints over that specific cell (not when they merely switch
-        // the picker selection elsewhere), so existing tiles still don't
-        // get silently repainted just by picking a different art.
-        if (prev[idx][2] === activeTileId) return prev; // no-op, avoid extra renders
+        if (idx === -1) return [...prev, [q, r, activeTileId, tileYOffset]];
+        if (prev[idx][2] === activeTileId && (prev[idx][3] ?? 0) === tileYOffset) return prev;
         const next = [...prev];
-        next[idx] = [q, r, activeTileId];
+        next[idx] = [q, r, activeTileId, tileYOffset];
         return next;
       });
     } else if (tool === "erase") {
@@ -266,7 +262,13 @@ export default function MapEditor() {
     // art, or a string referencing a tile in the shared library — the
     // game engine resolves these IDs to images at runtime.
     const floorStr = floor
-      .map(([q, r, tileId]) => `[${q},${r},${tileId ? JSON.stringify(tileId) : "null"}]`)
+      .map(([q, r, tileId, yOffset]) => {
+        const tid = tileId ? JSON.stringify(tileId) : "null";
+        const yo = yOffset ?? 0;
+        return yo !== 0
+          ? `[${q},${r},${tid},${yo}]`
+          : `[${q},${r},${tid}]`;
+      })
       .join(",");
     const entitiesStr = entities
       .map((e) => {
@@ -420,7 +422,7 @@ ${entitiesStr}
               {/* Floor tiles — sorted back-to-front */}
               {[...floor]
                 .sort((a, b) => a[1] - b[1] || a[0] - b[0])
-                .map(([q, r, tileId]) => {
+                .map(([q, r, tileId, yOffset]) => {
                   const { sx, sy } = hexToScreen(q, r);
                   const img =
                     (tileId && tileLibrary.find((t) => t.id === tileId)?.image_data_url) || DEFAULT_TILE_IMG;
@@ -432,7 +434,7 @@ ${entitiesStr}
                       style={{
                         position: "absolute",
                         left: sx - TILE_IMG_W / 2,
-                        top: sy - FACE_H / 2 - TILE_HEADROOM,
+                        top: sy - FACE_H / 2 - TILE_HEADROOM + (yOffset ?? 0),
                         width: TILE_IMG_W,
                         height: TILE_IMG_H,
                         imageRendering: "pixelated",
@@ -597,6 +599,23 @@ ${entitiesStr}
           {!tileLibraryLoading && !tileLibraryError && tileLibrary.length === 0 && (
             <div style={styles.hint}>no saved tiles yet — make one in the Pixel Editor</div>
           )}
+
+          <div style={styles.sectionLabel}>tile height offset</div>
+          <div style={styles.toolGrid}>
+            {[[-6, '▲ +6 up'], [0, '— default'], [6, '▼ +6 down']].map(([val, label]) => (
+              <button
+                key={val}
+                style={{
+                  ...styles.toolBtn,
+                  ...(tileYOffset === val ? styles.toolBtnActive : {}),
+                  gridColumn: val === 0 ? 'span 1' : undefined,
+                }}
+                onClick={() => setTileYOffset(val)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
           <div style={styles.sectionLabel}>place object</div>
           <div style={styles.toolGrid}>
