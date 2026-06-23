@@ -46,6 +46,17 @@ export default function LandingPage() {
             </div>
           </div>
         </Link>
+
+        <Link to="/characters" style={styles.cardLink}>
+          <div style={styles.card}>
+            <div style={styles.cardLabel}>CREW</div>
+            <div style={styles.cardTitle}>Character Builder</div>
+            <div style={styles.cardDesc}>
+              Generate player characters and NPC templates with PixelLab. Eight directions,
+              imported straight to the ship's manifest.
+            </div>
+          </div>
+        </Link>
       </div>
 
       <footer style={styles.footer}>
