@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import TileEditor from '../components/TileEditor.jsx';
 import ObjectEditor from '../components/ObjectEditor.jsx';
 import CharacterGenerator from '../components/CharacterGenerator.jsx';
+import PixellabObjectImport from '../components/PixellabObjectImport.jsx';
 
 export default function EditorPage() {
   const [mode, setMode] = useState('tile'); // 'tile' | 'object' | 'character'
@@ -35,7 +36,7 @@ export default function EditorPage() {
       </div>
       <div style={styles.editorWrap}>
         {mode === 'tile' && <TileEditor />}
-        {mode === 'object' && <ObjectEditor />}
+        {mode === 'object' && <><ObjectEditor /><PixellabObjectImport /></>}
         {mode === 'character' && <CharacterGenerator />}
       </div>
     </div>
