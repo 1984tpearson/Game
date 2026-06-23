@@ -283,21 +283,39 @@ export function ellipseCells(cx, cy, radiusX, yRatio = 1) {
 // baked in so subsequent strokes can compound naturally.
 export function blendColor(existingHex, newHex, opacity) {
   if (opacity >= 100) return newHex.slice(0, 7);
-  // Painting onto a transparent pixel: store the colour at reduced opacity
-  // as an 8-digit hex rather than blending against an implied black background.
-  if (!existingHex) {
-    const a = Math.round((opacity / 100) * 255).toString(16).padStart(2, '0');
-    return newHex.slice(0, 7) + a;
-  }
-  const a = opacity / 100;
+
+  const newA = opacity / 100; // alpha of incoming paint (0-1)
   const nr = parseInt(newHex.slice(1, 3), 16);
   const ng = parseInt(newHex.slice(3, 5), 16);
   const nb = parseInt(newHex.slice(5, 7), 16);
+
+  // Painting onto a transparent (null) pixel — store as 8-digit hex with alpha.
+  if (!existingHex) {
+    const a = Math.round(newA * 255).toString(16).padStart(2, '0');
+    return newHex.slice(0, 7) + a;
+  }
+
+  // Existing pixel may be 6-digit (fully opaque) or 8-digit (partial alpha).
   const er = parseInt(existingHex.slice(1, 3), 16);
   const eg = parseInt(existingHex.slice(3, 5), 16);
   const eb = parseInt(existingHex.slice(5, 7), 16);
+  const existA = existingHex.length === 9
+    ? parseInt(existingHex.slice(7, 9), 16) / 255
+    : 1.0;
+
+  // Standard alpha-compositing: src-over blend.
+  // outA = newA + existA * (1 - newA)
+  const outA = newA + existA * (1 - newA);
+  if (outA === 0) return null;
+
   const toHex = (v) => Math.round(v).toString(16).padStart(2, '0');
-  return `#${toHex(nr * a + er * (1 - a))}${toHex(ng * a + eg * (1 - a))}${toHex(nb * a + eb * (1 - a))}`;
+  const outR = (nr * newA + er * existA * (1 - newA)) / outA;
+  const outG = (ng * newA + eg * existA * (1 - newA)) / outA;
+  const outB = (nb * newA + eb * existA * (1 - newA)) / outA;
+
+  // If result is fully opaque, store as 6-digit hex (keeps existing logic clean).
+  if (outA >= 1) return `#${toHex(outR)}${toHex(outG)}${toHex(outB)}`;
+  return `#${toHex(outR)}${toHex(outG)}${toHex(outB)}${toHex(outA * 255)}`;
 }
 
 // ---------------- Canvas transforms (object mode) ----------------
