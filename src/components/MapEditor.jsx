@@ -147,6 +147,17 @@ export default function MapEditor() {
     return () => { cancelled = true; };
   }, []);
 
+  // Zoom-aware screen position: scales both the origin offset and the
+  // hex step distances so tiles render correctly at any zoom level.
+  function hexToScreenZ(q, r) {
+    const x = STEP_X * (q + r / 2);
+    const y = STEP_Y * r;
+    return {
+      sx: (ORIGIN_X + x) * zoom,
+      sy: (ORIGIN_Y + y) * zoom,
+    };
+  }
+
   function cellFromEvent(e) {
     const rect = canvasRef.current.getBoundingClientRect();
     const sx = (e.clientX - rect.left) / zoom;
@@ -432,7 +443,7 @@ ${entitiesStr}
               {[...floor]
                 .sort((a, b) => a[1] - b[1] || a[0] - b[0])
                 .map(([q, r, tileId, yOffset]) => {
-                  const { sx, sy } = hexToScreen(q, r);
+                  const { sx, sy } = hexToScreenZ(q, r);
                   const img =
                     (tileId && tileLibrary.find((t) => t.id === tileId)?.image_data_url) || DEFAULT_TILE_IMG;
                   return (
@@ -442,8 +453,8 @@ ${entitiesStr}
                       alt=""
                       style={{
                         position: "absolute",
-                        left: (sx - TILE_IMG_W / 2) * zoom,
-                        top: (sy - FACE_H / 2 - TILE_HEADROOM + (yOffset ?? 0)) * zoom,
+                        left: sx - (TILE_IMG_W / 2) * zoom,
+                        top: sy - (FACE_H / 2 + TILE_HEADROOM - (yOffset ?? 0)) * zoom,
                         width: TILE_IMG_W * zoom,
                         height: TILE_IMG_H * zoom,
                         imageRendering: "pixelated",
@@ -463,9 +474,7 @@ ${entitiesStr}
                 .map(e => {
                   const obj = objLibrary.find(o => o.id === e.objectId);
                   if (!obj) return null;
-                  const { sx, sy } = hexToScreen(e.q, e.r);
-                  // Also apply the floor tile's yOffset at this position so
-                  // objects sit correctly on raised or lowered tiles.
+                  const { sx, sy } = hexToScreenZ(e.q, e.r);
                   const floorCell = floor.find(([fq, fr]) => fq === e.q && fr === e.r);
                   const floorYOffset = floorCell ? (floorCell[3] ?? 0) : 0;
                   const dispW = obj.width_px;
@@ -478,8 +487,8 @@ ${entitiesStr}
                       alt={e.label}
                       style={{
                         position: "absolute",
-                        left: (sx - dispW / 2) * zoom,
-                        top: (sy - dispH + 6 + floorYOffset) * zoom,
+                        left: sx - (dispW / 2) * zoom,
+                        top: sy - (dispH - 6 - floorYOffset) * zoom,
                         width: dispW * zoom,
                         height: dispH * zoom,
                         imageRendering: "pixelated",
@@ -503,20 +512,20 @@ ${entitiesStr}
               onPointerCancel={handlePointerUp}
             >
               {entities.map((e) => {
-                const { sx, sy } = hexToScreen(e.q, e.r);
+                const { sx, sy } = hexToScreenZ(e.q, e.r);
                 const isSelected = e.id === selectedEntityId;
                 if (e.objectId && !isSelected) return null;
                 return (
                   <g key={e.id}>
                     <circle
-                      cx={sx * zoom}
-                      cy={sy * zoom}
+                      cx={sx}
+                      cy={sy}
                       r={9 * zoom}
                       fill={e.color}
                       stroke={isSelected ? COLORS.brass : "#000"}
                       strokeWidth={isSelected ? 2 : 1}
                     />
-                    <text x={sx * zoom} y={(sy - 16) * zoom} fontSize={8.5 * zoom} fill={COLORS.text} textAnchor="middle" fontFamily="monospace">
+                    <text x={sx} y={sy - 16 * zoom} fontSize={8.5 * zoom} fill={COLORS.text} textAnchor="middle" fontFamily="monospace">
                       {e.label}
                     </text>
                   </g>
@@ -524,11 +533,11 @@ ${entitiesStr}
               })}
 
               {spawn && (() => {
-                const { sx, sy } = hexToScreen(spawn.q, spawn.r);
+                const { sx, sy } = hexToScreenZ(spawn.q, spawn.r);
                 return (
                   <polygon
                     key="spawn-marker"
-                    points={`${sx*zoom},${(sy-10)*zoom} ${(sx-7)*zoom},${(sy+5)*zoom} ${(sx+7)*zoom},${(sy+5)*zoom}`}
+                    points={`${sx},${sy - 10 * zoom} ${sx - 7 * zoom},${sy + 5 * zoom} ${sx + 7 * zoom},${sy + 5 * zoom}`}
                     fill={COLORS.brass}
                     opacity="0.9"
                   />
