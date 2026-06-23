@@ -231,11 +231,11 @@ function HexEngine({
   // Map hex direction names to sprite filenames (6 dirs -> 8 sprites)
   const DIR_TO_SPRITE = {
     E:  "east",
-    W:  "west",
+    W:  "north-west",
     NE: "north-east",
     NW: "north-west",
     SE: "south-east",
-    SW: "south-west",
+    SW: "west",
   };
 
   const tryMove = useCallback(
