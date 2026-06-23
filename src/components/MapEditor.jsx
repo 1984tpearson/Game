@@ -171,8 +171,8 @@ export default function MapEditor() {
   }
 
   function cellFromEvent(e) {
-    const rect = canvasRef.current.getBoundingClientRect();
     const vp = viewportRef.current;
+    const rect = vp.getBoundingClientRect();
     const sx = (e.clientX - rect.left + vp.scrollLeft) / zoom;
     const sy = (e.clientY - rect.top  + vp.scrollTop)  / zoom;
     return screenToHex(sx, sy);
