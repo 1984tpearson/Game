@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import WreckAndRuinGame from '../components/WreckAndRuinGame.jsx';
 import { listMaps, loadMap, getGameConfig } from '../lib/maps.js';
+import { getObjectsByIds } from '../lib/objects.js';
 
 export default function GamePage() {
   const [scenes, setScenes] = useState(null);
@@ -25,6 +26,26 @@ export default function GamePage() {
             entities: map.entities || [],
             spawn: map.spawn || { q: 0, r: 0 },
           };
+        }
+
+        // Resolve object images: collect all objectIds across all scenes,
+        // fetch in one query, then stamp imageDataUrl/dimensions onto each entity.
+        const allObjectIds = Object.values(scenesObj)
+          .flatMap(s => s.entities)
+          .map(e => e.objectId)
+          .filter(Boolean);
+
+        if (allObjectIds.length > 0) {
+          const objMap = await getObjectsByIds(allObjectIds);
+          for (const scene of Object.values(scenesObj)) {
+            scene.entities = scene.entities.map(e => {
+              if (e.objectId && objMap[e.objectId]) {
+                const obj = objMap[e.objectId];
+                return { ...e, imageDataUrl: obj.image_data_url, widthPx: obj.width_px, heightPx: obj.height_px };
+              }
+              return e;
+            });
+          }
         }
 
         if (Object.keys(scenesObj).length === 0) {

@@ -571,6 +571,26 @@ function HexEngine({
                     </g>
                   );
                 }
+                if (e.imageDataUrl) {
+                  // Object with resolved pixel art — render sprite anchored at foot
+                  const iw = e.widthPx || 39;
+                  const ih = e.heightPx || 39;
+                  // Sort key: objects further right (higher q) render behind objects further left,
+                  // matching the engine's depth-sort convention.
+                  return (
+                    <g key={e.id}>
+                      <ellipse cx={sx} cy={sy + 2} rx={Math.min(iw / 4, 12)} ry="3" fill="#000" opacity="0.3" />
+                      <image
+                        href={e.imageDataUrl}
+                        x={sx - iw / 2}
+                        y={sy - ih}
+                        width={iw}
+                        height={ih}
+                        style={{ imageRendering: "pixelated" }}
+                      />
+                    </g>
+                  );
+                }
                 return (
                   <g key={e.id}>
                     <ellipse cx={sx} cy={sy + 4} rx="9" ry="4" fill="#000" opacity="0.35" />
