@@ -22,8 +22,10 @@ const DEFAULT_TILE_IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACcAAAAe
 
 const CANVAS_W = 640;
 const CANVAS_H = 440;
-const ORIGIN_X = CANVAS_W / 2;
-const ORIGIN_Y = CANVAS_H / 2;
+const MAP_W = 4000;  // large virtual canvas — effectively unbounded painting area
+const MAP_H = 4000;
+const ORIGIN_X = MAP_W / 2;
+const ORIGIN_Y = MAP_H / 2;
 
 function hexKey(q, r) {
   return `${q},${r}`;
@@ -97,6 +99,16 @@ export default function MapEditor() {
   const [exportStr, setExportStr] = useState("");
   const [zoom, setZoom] = useState(2); // 1x, 2x, 3x, 4x — default 2x
   const canvasRef = useRef(null);
+  const viewportRef = useRef(null);
+
+  // Scroll to centre of the virtual canvas on first render so the
+  // origin (where tiles start) is in the middle of the viewport.
+  useEffect(() => {
+    if (viewportRef.current) {
+      viewportRef.current.scrollLeft = (MAP_W / 2) - CANVAS_W / 2;
+      viewportRef.current.scrollTop  = (MAP_H / 2) - CANVAS_H / 2;
+    }
+  }, []);
 
   // Map save/load state
   const [loadedMapId, setLoadedMapId] = useState(null);
@@ -160,8 +172,9 @@ export default function MapEditor() {
 
   function cellFromEvent(e) {
     const rect = canvasRef.current.getBoundingClientRect();
-    const sx = (e.clientX - rect.left) / zoom;
-    const sy = (e.clientY - rect.top) / zoom;
+    const vp = viewportRef.current;
+    const sx = (e.clientX - rect.left + vp.scrollLeft) / zoom;
+    const sy = (e.clientY - rect.top  + vp.scrollTop)  / zoom;
     return screenToHex(sx, sy);
   }
 
@@ -433,12 +446,12 @@ ${entitiesStr}
                   ...(zoom === z ? styles.toolBtnActive : {}) }}>{z}×</button>
             ))}
           </div>
-          <div style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}`, touchAction: "none", overflow: 'auto' }}>
+          <div ref={viewportRef} style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}`, touchAction: "none", overflow: 'auto' }}>
             {/* Tile art layer: plain HTML <img> tags (not SVG <image>),
                 since SVG <image> with data URIs doesn't render reliably
                 in some browser contexts — matches the approach used in
                 the actual game engine. */}
-            <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W * zoom, height: CANVAS_H * zoom, pointerEvents: "none" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, width: MAP_W * zoom, height: MAP_H * zoom, pointerEvents: "none" }}>
               {/* Floor tiles — sorted back-to-front */}
               {[...floor]
                 .sort((a, b) => a[1] - b[1] || a[0] - b[0])
@@ -502,8 +515,8 @@ ${entitiesStr}
 
             <svg
               ref={canvasRef}
-              width={CANVAS_W * zoom}
-              height={CANVAS_H * zoom}
+              width={MAP_W * zoom}
+              height={MAP_H * zoom}
               style={{ position: "absolute", top: 0, left: 0, background: "transparent", cursor: "crosshair", touchAction: "none" }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
