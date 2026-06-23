@@ -351,7 +351,7 @@ function HexEngine({
         cancelWalk();
         if (onArrive) onArrive();
       }
-    }, 150);
+    }, 300);
   }
 
   // Handle click on canvas: convert pixel -> hex -> pathfind -> walk
@@ -374,18 +374,32 @@ function HexEngine({
     // Check if there's an entity there
     const targetEntity = entities.find(e => e.trigger === "enter" && entityOccupiesTile(e, tq, tr));
 
-    // Build blocked set: blocksMovement entities, excluding the target if it's walkable
+    // Build blocked set: blocksMovement entities + trigger tiles,
+    // but exclude the goal tile so the player can walk directly onto it when clicked.
+    const goalKey = hexKey(tq, tr);
     const blockedSet = new Set(
       entities
-        .filter(e => e.blocksMovement)
+        .filter(e => e.blocksMovement || e.trigger === "enter")
         .flatMap(e => entityTiles(e).map(t => hexKey(t.q, t.r)))
+        .filter(k => k !== goalKey)
     );
 
     const cur = playerPosRef.current;
     // If clicking current tile, do nothing
     if (tq === cur.q && tr === cur.r) return;
 
-    const path = hexAstarClean(cur.q, cur.r, tq, tr, floor, blockedSet);
+    // First try pathfinding avoiding trigger tiles.
+    // If no path exists, fall back to treating trigger tiles as passable.
+    let path = hexAstarClean(cur.q, cur.r, tq, tr, floor, blockedSet);
+    if (!path || path.length === 0) {
+      const blockedSetNoTriggers = new Set(
+        entities
+          .filter(e => e.blocksMovement)
+          .flatMap(e => entityTiles(e).map(t => hexKey(t.q, t.r)))
+          .filter(k => k !== goalKey)
+      );
+      path = hexAstarClean(cur.q, cur.r, tq, tr, floor, blockedSetNoTriggers);
+    }
     if (!path || path.length === 0) return;
 
     startWalk(path, null);
