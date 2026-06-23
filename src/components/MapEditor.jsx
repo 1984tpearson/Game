@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { listTiles } from '../lib/tiles.js';
 import { listObjects } from '../lib/objects.js';
-import { listMaps, loadMap, saveMap, updateMap } from '../lib/maps.js';
+import { listMaps, loadMap, saveMap, updateMap, setStartScene } from '../lib/maps.js';
 
 // =================================================================
 // Matches the game engine's hex geometry: pointy-top axial coords,
@@ -114,6 +114,7 @@ export default function MapEditor() {
   const [loadedMapId, setLoadedMapId] = useState(null);
   const [mapSaveStatus, setMapSaveStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
   const [mapSaveError, setMapSaveError] = useState(null);
+  const [setStartStatus, setSetStartStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
   const [mapLibrary, setMapLibrary] = useState([]);
   const [mapLibraryLoading, setMapLibraryLoading] = useState(false);
   const [mapLibraryError, setMapLibraryError] = useState(null);
@@ -419,6 +420,19 @@ ${entitiesStr}
     setSelectedEntityId(null);
     setExportStr('');
     setMapSaveStatus(null);
+    setSetStartStatus(null);
+  }
+
+  async function handleSetStartScene() {
+    if (!sceneId.trim()) return;
+    setSetStartStatus('saving');
+    try {
+      await setStartScene(sceneId.trim());
+      setSetStartStatus('saved');
+      setTimeout(() => setSetStartStatus(null), 2000);
+    } catch (e) {
+      setSetStartStatus('error');
+    }
   }
 
   return (
@@ -441,6 +455,16 @@ ${entitiesStr}
           </button>
           {loadedMapId && (
             <button style={styles.headerBtn} onClick={() => saveCurrentMap(true)}>Save as new</button>
+          )}
+          {loadedMapId && (
+            <button
+              style={{ ...styles.headerBtn, ...(setStartStatus === 'saved' ? { color: COLORS.brass, borderColor: COLORS.brass } : {}) }}
+              onClick={handleSetStartScene}
+              disabled={setStartStatus === 'saving'}
+              title={`Set "${sceneId}" as the opening scene`}
+            >
+              {setStartStatus === 'saving' ? 'Setting…' : setStartStatus === 'saved' ? '✓ Start scene set' : 'Set as start scene'}
+            </button>
           )}
         </div>
         <span style={styles.headerSub}>drag to paint floor · click to place entities</span>

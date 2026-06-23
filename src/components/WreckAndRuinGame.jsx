@@ -849,7 +849,11 @@ Generate exactly 2 npcs.`;
 // MAIN GAME COMPONENT
 // =====================================================================
 
-export default function WreckAndRuin() {
+export default function WreckAndRuin({ scenes: propScenes, startScene: propStartScene }) {
+  // Use scenes/startScene from props (loaded from DB by GamePage) if provided,
+  // otherwise fall back to the hardcoded SCENES for local dev convenience.
+  const resolvedScenes = propScenes || SCENES;
+  const resolvedStartScene = propStartScene || "ship";
   const [shipMessages, setShipMessages] = useState([
     { role: "assistant", content: "CASEWORK ONLINE. State your business." },
   ]);
@@ -949,8 +953,8 @@ export default function WreckAndRuin() {
   return (
     <HexEngine
       theme={THEME}
-      scenes={SCENES}
-      startScene="ship"
+      scenes={resolvedScenes}
+      startScene={resolvedStartScene}
       onInteract={onInteract}
       generateScene={(sceneId, ctx) =>
         sceneId === "world" ? generateWorldScene(sceneId, ctx) : Promise.resolve({})

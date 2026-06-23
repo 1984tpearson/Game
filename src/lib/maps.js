@@ -51,3 +51,21 @@ export async function deleteMap(id) {
   const { error } = await supabase.from('maps').delete().eq('id', id);
   if (error) throw error;
 }
+
+export async function getGameConfig() {
+  const { data, error } = await supabase
+    .from('game_config')
+    .select('start_scene_id')
+    .eq('id', 1)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function setStartScene(sceneId) {
+  const { error } = await supabase
+    .from('game_config')
+    .update({ start_scene_id: sceneId, updated_at: new Date().toISOString() })
+    .eq('id', 1);
+  if (error) throw error;
+}
