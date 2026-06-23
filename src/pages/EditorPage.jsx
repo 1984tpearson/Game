@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import TileEditor from '../components/TileEditor.jsx';
 import ObjectEditor from '../components/ObjectEditor.jsx';
+import CharacterGenerator from '../components/CharacterGenerator.jsx';
 
 export default function EditorPage() {
-  const [mode, setMode] = useState('tile'); // 'tile' | 'object'
+  const [mode, setMode] = useState('tile'); // 'tile' | 'object' | 'character'
 
   return (
     <div style={styles.root}>
@@ -23,11 +24,19 @@ export default function EditorPage() {
           >
             Objects
           </button>
+          <button
+            style={{ ...styles.modeBtn, ...(mode === 'character' ? styles.modeBtnActive : {}) }}
+            onClick={() => setMode('character')}
+          >
+            Characters
+          </button>
         </div>
         <Link to="/map-editor" style={styles.navLink}>map editor</Link>
       </div>
       <div style={styles.editorWrap}>
-        {mode === 'tile' ? <TileEditor /> : <ObjectEditor />}
+        {mode === 'tile' && <TileEditor />}
+        {mode === 'object' && <ObjectEditor />}
+        {mode === 'character' && <CharacterGenerator />}
       </div>
     </div>
   );
