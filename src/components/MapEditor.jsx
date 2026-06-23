@@ -511,6 +511,7 @@ ${entitiesStr}
                         width: TILE_IMG_W * zoom,
                         height: TILE_IMG_H * zoom,
                         imageRendering: "pixelated",
+                        filter: (yOffset ?? 0) === 6 ? "brightness(0.82)" : (yOffset ?? 0) === -6 ? "brightness(1.12)" : "none",
                       }}
                     />
                   );

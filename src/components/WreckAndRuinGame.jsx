@@ -539,7 +539,8 @@ function HexEngine({
                       top: sy - faceH / 2 - headroom + yOffset,
                       width: T.tileImgW,
                       height: T.tileImgH,
-                      opacity: isMarked ? 1 : 0.88,
+                      opacity: 1,
+                      filter: yOffset === 6 ? "brightness(0.82)" : yOffset === -6 ? "brightness(1.12)" : "none",
                       pointerEvents: "none",
                       imageRendering: "pixelated",
                     }}
