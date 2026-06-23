@@ -1,9 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { saveTile, listTiles, updateTile } from '../lib/tiles.js';
+import { saveTile, listTiles, updateTile, deleteTile } from '../lib/tiles.js';
 import {
   makeBlankGrid, cloneGrid, setCell, floodFill,
   gridToDataUrl, decodeImageToGrid,
-  jitterColor, darkenColor,
+  jitterColor, darkenColor, blendColor,
   brushCells, lineCells, ellipseCells,
   PALETTE, PALETTE_ROW_LABELS,
 } from '../lib/pixelArt.js';
@@ -82,6 +82,7 @@ export default function TileEditor() {
   const [opacity, setOpacity] = useState(100);
   const [preserveTransparency, setPreserveTransparency] = useState(false);
   const [history, setHistory] = useState([]);
+  const [future, setFuture] = useState([]);
   const [exportStr, setExportStr] = useState('');
   const [exportImg, setExportImg] = useState(null);
   const [tileName, setTileName] = useState('');
@@ -103,19 +104,19 @@ export default function TileEditor() {
   const canvasRef = useRef(null);
   const exportCanvasRef = useRef(null);
 
-  const pushHistory = useCallback((g) => setHistory((h) => [...h.slice(-19), g]), []);
+  const pushHistory = useCallback((g) => {
+    setHistory((h) => [...h.slice(-19), g]);
+    setFuture([]);  // any new action clears redo stack
+  }, []);
 
   function paintCells(g, cells) {
     let next = g;
     for (const { x, y } of cells) {
       let paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
-      // If opacity < 100, append the alpha byte to make an 8-digit hex colour.
-      // This only applies to the pencil (paintCells is not called by eraser/shadow).
-      if (opacity < 100) {
-        const a = Math.round((opacity / 100) * 255).toString(16).padStart(2, '0');
-        paintColor = paintColor.slice(0, 7) + a; // strip any existing alpha, add new
-      }
       if (preserveTransparency && (next[y]?.[x] ?? null) === null) continue;
+      // Blend against existing pixel if opacity < 100; result is always opaque.
+      const existing = next[y]?.[x] ?? null;
+      paintColor = blendColor(existing, paintColor, opacity);
       next = setCell(next, x, y, paintColor, GRID_W, GRID_H);
     }
     return next;
@@ -147,7 +148,8 @@ export default function TileEditor() {
       }
       if (tool === 'fill') {
         if (preserveTransparency && existing === null) return g;
-        const paint = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+        const baseColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+        const paint = blendColor(existing, baseColor, opacity);
         return floodFill(g, x, y, existing, paint, GRID_W, GRID_H);
       }
       if (tool === 'picker') {
@@ -213,8 +215,18 @@ export default function TileEditor() {
   function undo() {
     setHistory((h) => {
       if (!h.length) return h;
+      setFuture((f) => [grid, ...f.slice(0, 19)]);
       setGrid(h[h.length - 1]);
       return h.slice(0, -1);
+    });
+  }
+
+  function redo() {
+    setFuture((f) => {
+      if (!f.length) return f;
+      setHistory((h) => [...h.slice(-19), grid]);
+      setGrid(f[0]);
+      return f.slice(1);
     });
   }
 
@@ -233,6 +245,8 @@ export default function TileEditor() {
       return next;
     });
   }
+
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   function generateExport() {
     const dataUrl = gridToDataUrl(grid, GRID_W, GRID_H, exportCanvasRef.current);
@@ -254,6 +268,16 @@ export default function TileEditor() {
       }
       setSaveStatus('saved');
     } catch (e) { setSaveStatus('error'); setSaveError(e.message || 'Save failed.'); }
+  }
+
+  async function deleteFromLibrary() {
+    if (!loadedTileId) return;
+    setSaveStatus('saving'); setSaveError(null);
+    try {
+      await deleteTile(loadedTileId);
+      setDeleteConfirm(false);
+      startNew();
+    } catch (e) { setSaveStatus('error'); setSaveError(e.message || 'Delete failed.'); }
   }
 
   async function openLibraryPanel() {
@@ -354,7 +378,7 @@ export default function TileEditor() {
           jitterAmount={jitterAmount} setJitterAmount={setJitterAmount}
           opacity={opacity} setOpacity={setOpacity}
           preserveTransparency={preserveTransparency} setPreserveTransparency={setPreserveTransparency}
-          onUndo={undo} onClear={clearAll}
+          onUndo={undo} onRedo={redo} onClear={clearAll}
           extraQuickActions={[
             { label: 'Fill outline', fn: fillMaskOutline },
             { label: loadedTileId ? `Load tile… (${tileName || 'untitled'})` : 'Load tile…', fn: openLibraryPanel },
@@ -401,6 +425,20 @@ export default function TileEditor() {
             <button style={S.actionBtn} onClick={() => saveToLibrary(true)} disabled={saveStatus==='saving'}>
               Save as new tile instead
             </button>
+          )}
+          {loadedTileId && (
+            <div style={{ marginTop: 6 }}>
+              {!deleteConfirm
+                ? <button style={{...S.actionBtn, color: C.rust}} onClick={() => setDeleteConfirm(true)}>Delete tile from library…</button>
+                : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{fontSize:10, color:C.rust}}>Delete «{tileName}» permanently?</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button style={{...S.exportBtn, flex:1}} onClick={deleteFromLibrary} disabled={saveStatus==='saving'}>Yes, delete</button>
+                      <button style={{...S.actionBtn, flex:1}} onClick={() => setDeleteConfirm(false)}>Cancel</button>
+                    </div>
+                  </div>
+              }
+            </div>
           )}
           {saveStatus==='saved' && <div style={{fontSize:10,color:C.brass}}>Saved.</div>}
           {saveStatus==='error' && <div style={{fontSize:10,color:C.rust}}>{saveError}</div>}
@@ -483,7 +521,7 @@ export function PixelSidebar({
   jitterAmount, setJitterAmount,
   opacity = 100, setOpacity,
   preserveTransparency, setPreserveTransparency,
-  onUndo, onClear,
+  onUndo, onRedo, onClear,
   extraQuickActions = [],
   onExport,
   exportReady,
@@ -497,6 +535,7 @@ export function PixelSidebar({
     <div style={S.sidebar}>
       <div style={S.quickActionsRow}>
         <button style={S.quickActionBtn} onClick={onUndo}>↶ Undo</button>
+        <button style={S.quickActionBtn} onClick={onRedo}>↷ Redo</button>
         <button style={S.quickActionBtn} onClick={onClear}>Clear all</button>
         {extraQuickActions.map(({ label, fn }) => (
           <button key={label} style={S.quickActionBtn} onClick={fn}>{label}</button>
@@ -638,7 +677,7 @@ export const S = {
   guideLine: { position: 'absolute', left: 0, width: '100%', height: 1, pointerEvents: 'none' },
   gridSvg: { position: 'absolute', left: 0, top: 0, pointerEvents: 'none' },
   sidebar: { display: 'flex', flexDirection: 'column', gap: 8, minWidth: 460, maxWidth: 460 },
-  quickActionsRow: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 },
+  quickActionsRow: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 },
   quickActionBtn: { background: C.panel, border: `1px solid ${C.brass}`, color: C.brass,
     padding: '9px 4px', fontFamily: "'Space Mono', monospace", fontSize: 11, cursor: 'pointer' },
   editingRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10 },

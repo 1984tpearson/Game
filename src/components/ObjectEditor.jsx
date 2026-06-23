@@ -1,10 +1,11 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { saveObject, listObjects, updateObject } from '../lib/objects.js';
+import { saveObject, listObjects, updateObject, deleteObject } from '../lib/objects.js';
 import {
   makeBlankGrid, cloneGrid, setCell, floodFill,
   gridToDataUrl, decodeImageToGrid,
-  jitterColor, darkenColor,
+  jitterColor, darkenColor, blendColor,
   brushCells, lineCells, ellipseCells,
+  cropGrid, expandGrid, scaleGrid,
 } from '../lib/pixelArt.js';
 import {
   Overlay, ExportPreview, LibraryItem, PixelSidebar, C, S,
@@ -111,9 +112,20 @@ export default function ObjectEditor() {
   const [opacity, setOpacity] = useState(100);
   const [preserveTransparency, setPreserveTransparency] = useState(false);
   const [history, setHistory] = useState([]);
+  const [future, setFuture] = useState([]);
 
   const [exportImg, setExportImg] = useState(null);
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
+
+  // Canvas transform UI state
+  const [expandTop, setExpandTop] = useState(0);
+  const [expandRight, setExpandRight] = useState(0);
+  const [expandBottom, setExpandBottom] = useState(0);
+  const [expandLeft, setExpandLeft] = useState(0);
+  const [scaleTargetW, setScaleTargetW] = useState(DEFAULT_W);
+  const [scaleTargetH, setScaleTargetH] = useState(DEFAULT_H);
+
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const [objName, setObjName] = useState('');
   const [footprint, setFootprint] = useState([[0, 0]]);
@@ -139,12 +151,13 @@ export default function ObjectEditor() {
   const fileInputRef = useRef(null);
   const [importError, setImportError] = useState(null);
 
-  const pushHistory = useCallback((g) => setHistory((h) => [...h.slice(-19), g]), []);
+  const pushHistory = useCallback((g) => {
+    setHistory((h) => [...h.slice(-19), g]);
+    setFuture([]);
+  }, []);
 
   function applyDimensions() {
     if (objW === gridW && objH === gridH) return;
-    // Resize the grid — keep any existing pixels that fit in the new
-    // dimensions, discard those outside (cropped), blank fills new space.
     const next = makeBlankGrid(objW, objH);
     for (let y = 0; y < Math.min(gridH, objH); y++)
       for (let x = 0; x < Math.min(gridW, objW); x++)
@@ -155,15 +168,58 @@ export default function ObjectEditor() {
     setGridH(objH);
   }
 
+  function applyCrop() {
+    const { grid: next, width: newW, height: newH } = cropGrid(grid, gridW, gridH);
+    pushHistory(grid);
+    setGrid(next);
+    setGridW(newW); setGridH(newH);
+    setObjW(newW); setObjH(newH);
+  }
+
+  function applyExpand() {
+    const t = Math.max(0, expandTop), r = Math.max(0, expandRight),
+          b = Math.max(0, expandBottom), l = Math.max(0, expandLeft);
+    if (!t && !r && !b && !l) return;
+    const { grid: next, width: newW, height: newH } = expandGrid(grid, gridW, gridH, t, r, b, l);
+    pushHistory(grid);
+    setGrid(next);
+    setGridW(newW); setGridH(newH);
+    setObjW(newW); setObjH(newH);
+    setExpandTop(0); setExpandRight(0); setExpandBottom(0); setExpandLeft(0);
+  }
+
+  function applyScale() {
+    if (scaleTargetW < 1 || scaleTargetH < 1) return;
+    const { grid: next, width: newW, height: newH } = scaleGrid(grid, gridW, gridH, scaleTargetW, scaleTargetH);
+    pushHistory(grid);
+    setGrid(next);
+    setGridW(newW); setGridH(newH);
+    setObjW(newW); setObjH(newH);
+  }
+
+  async function deleteFromLibrary() {
+    if (!loadedObjId) return;
+    setSaveStatus('saving'); setSaveError(null);
+    try {
+      await deleteObject(loadedObjId);
+      setDeleteConfirm(false);
+      startNew();
+    } catch (e) { setSaveStatus('error'); setSaveError(e.message || 'Delete failed.'); }
+  }
+
+  function generateExport() {
+    const dataUrl = gridToDataUrl(grid, gridW, gridH, exportCanvasRef.current);
+    setExportImg(dataUrl);
+    setExportPanelOpen(true);
+  }
+
   function paintCells(g, cells) {
     let next = g;
     for (const { x, y } of cells) {
       let paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
-      if (opacity < 100) {
-        const a = Math.round((opacity / 100) * 255).toString(16).padStart(2, '0');
-        paintColor = paintColor.slice(0, 7) + a;
-      }
       if (preserveTransparency && (next[y]?.[x] ?? null) === null) continue;
+      const existing = next[y]?.[x] ?? null;
+      paintColor = blendColor(existing, paintColor, opacity);
       next = setCell(next, x, y, paintColor, gridW, gridH);
     }
     return next;
@@ -195,7 +251,8 @@ export default function ObjectEditor() {
       }
       if (tool === 'fill') {
         if (preserveTransparency && existing === null) return g;
-        const paint = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+        const baseColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
+        const paint = blendColor(existing, baseColor, opacity);
         return floodFill(g, x, y, existing, paint, gridW, gridH);
       }
       if (tool === 'picker') {
@@ -261,20 +318,24 @@ export default function ObjectEditor() {
   function undo() {
     setHistory((h) => {
       if (!h.length) return h;
+      setFuture((f) => [grid, ...f.slice(0, 19)]);
       setGrid(h[h.length - 1]);
       return h.slice(0, -1);
+    });
+  }
+
+  function redo() {
+    setFuture((f) => {
+      if (!f.length) return f;
+      setHistory((h) => [...h.slice(-19), grid]);
+      setGrid(f[0]);
+      return f.slice(1);
     });
   }
 
   function clearAll() {
     pushHistory(grid);
     setGrid(makeBlankGrid(gridW, gridH));
-  }
-
-  function generateExport() {
-    const dataUrl = gridToDataUrl(grid, gridW, gridH, exportCanvasRef.current);
-    setExportImg(dataUrl);
-    setExportPanelOpen(true);
   }
 
   async function saveToLibrary(forceNew = false) {
@@ -317,6 +378,7 @@ export default function ObjectEditor() {
       setGrid(decoded);
       setGridW(obj.width_px); setGridH(obj.height_px);
       setObjW(obj.width_px); setObjH(obj.height_px);
+      setScaleTargetW(obj.width_px); setScaleTargetH(obj.height_px);
       setLoadedObjId(obj.id);
       setObjName(obj.name);
       setFootprint(obj.footprint || [[0, 0]]);
@@ -372,6 +434,7 @@ export default function ObjectEditor() {
           setGrid(decoded);
           setGridW(w); setGridH(h);
           setObjW(w); setObjH(h);
+          setScaleTargetW(w); setScaleTargetH(h);
           // Clear any loaded-object tracking — this is new art, not a
           // library object being edited, even if we later save it there.
           setLoadedObjId(null);
@@ -457,7 +520,7 @@ export default function ObjectEditor() {
           jitterAmount={jitterAmount} setJitterAmount={setJitterAmount}
           opacity={opacity} setOpacity={setOpacity}
           preserveTransparency={preserveTransparency} setPreserveTransparency={setPreserveTransparency}
-          onUndo={undo} onClear={clearAll}
+          onUndo={undo} onRedo={redo} onClear={clearAll}
           extraQuickActions={[
             { label: loadedObjId ? `Load obj… (${objName||'…'})` : 'Load obj…', fn: openLibraryPanel },
           ]}
@@ -501,6 +564,42 @@ export default function ObjectEditor() {
               {(objW !== gridW || objH !== gridH) && (
                 <div style={{ ...S.hint, color: C.rust }}>unsaved size change — click Apply to resize canvas</div>
               )}
+
+              <div style={S.sectionLabel}>crop / expand</div>
+              <button style={S.actionBtn} onClick={applyCrop}>Auto-trim transparent edges</button>
+              <div style={{ fontSize: 9, color: C.textDim }}>add padding (px)</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+                {[['top', expandTop, setExpandTop], ['right', expandRight, setExpandRight],
+                  ['bottom', expandBottom, setExpandBottom], ['left', expandLeft, setExpandLeft]].map(([label, val, setter]) => (
+                  <label key={label} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: C.textDim }}>
+                    {label}
+                    <input type="number" min="0" max="200" value={val}
+                      onChange={e => setter(Math.max(0, Number(e.target.value)))}
+                      style={{ ...S.textInput, width: 44, padding: '4px 6px' }} />
+                  </label>
+                ))}
+              </div>
+              <button style={S.actionBtn} onClick={applyExpand}>Apply padding</button>
+
+              <div style={S.sectionLabel}>scale (nearest-neighbour)</div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="number" min="1" max="400" value={scaleTargetW}
+                  onChange={e => setScaleTargetW(Math.max(1, Math.min(400, Number(e.target.value))))}
+                  style={{ ...S.textInput, width: 60 }} />
+                <span style={{ color: C.textDim, fontSize: 10 }}>×</span>
+                <input type="number" min="1" max="800" value={scaleTargetH}
+                  onChange={e => setScaleTargetH(Math.max(1, Math.min(800, Number(e.target.value))))}
+                  style={{ ...S.textInput, width: 60 }} />
+                <button style={S.actionBtn} onClick={applyScale}>Scale</button>
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {[[0.5,'0.5×'],[2,'2×'],[3,'3×']].map(([factor, label]) => (
+                  <button key={label} style={{ ...S.actionBtn, flex: 1, textAlign: 'center', fontSize: 10 }}
+                    onClick={() => { setScaleTargetW(Math.round(gridW * factor)); setScaleTargetH(Math.round(gridH * factor)); }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           }
         />
@@ -554,6 +653,20 @@ export default function ObjectEditor() {
             <button style={S.actionBtn} onClick={() => saveToLibrary(true)} disabled={saveStatus==='saving'}>
               Save as new object instead
             </button>
+          )}
+          {loadedObjId && (
+            <div style={{ marginTop: 6 }}>
+              {!deleteConfirm
+                ? <button style={{...S.actionBtn, color: C.rust}} onClick={() => setDeleteConfirm(true)}>Delete object from library…</button>
+                : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{fontSize:10, color:C.rust}}>Delete «{objName}» permanently?</div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button style={{...S.exportBtn, flex:1}} onClick={deleteFromLibrary} disabled={saveStatus==='saving'}>Yes, delete</button>
+                      <button style={{...S.actionBtn, flex:1}} onClick={() => setDeleteConfirm(false)}>Cancel</button>
+                    </div>
+                  </div>
+              }
+            </div>
           )}
           {saveStatus==='saved' && <div style={{fontSize:10,color:C.brass}}>Saved — available in the Map Editor.</div>}
           {saveStatus==='error' && <div style={{fontSize:10,color:C.rust}}>{saveError}</div>}

@@ -275,6 +275,71 @@ export function ellipseCells(cx, cy, radiusX, yRatio = 1) {
   });
 }
 
+// ---------------- Color blending ----------------
+
+// Alpha-composites `newHex` (with opacity 0-100) over `existingHex`.
+// Both are 6-digit hex strings (or null for transparent background).
+// Returns a fully-opaque 6-digit hex result — the blended colour is
+// baked in so subsequent strokes can compound naturally.
+export function blendColor(existingHex, newHex, opacity) {
+  if (opacity >= 100) return newHex.slice(0, 7); // strip any alpha suffix, full replace
+  const a = opacity / 100;
+  // Parse new colour (strip alpha byte if present)
+  const nr = parseInt(newHex.slice(1, 3), 16);
+  const ng = parseInt(newHex.slice(3, 5), 16);
+  const nb = parseInt(newHex.slice(5, 7), 16);
+  // Parse existing colour, default to transparent (black) if null
+  const er = existingHex ? parseInt(existingHex.slice(1, 3), 16) : 0;
+  const eg = existingHex ? parseInt(existingHex.slice(3, 5), 16) : 0;
+  const eb = existingHex ? parseInt(existingHex.slice(5, 7), 16) : 0;
+  const toHex = (v) => Math.round(v).toString(16).padStart(2, '0');
+  return `#${toHex(nr * a + er * (1 - a))}${toHex(ng * a + eg * (1 - a))}${toHex(nb * a + eb * (1 - a))}`;
+}
+
+// ---------------- Canvas transforms (object mode) ----------------
+
+// Auto-trim: shrink canvas to the bounding box of all non-null pixels.
+// Returns { grid, width, height } with the new dimensions.
+// If the canvas is entirely empty, returns a 1×1 blank rather than 0×0.
+export function cropGrid(grid, width, height) {
+  let minX = width, maxX = -1, minY = height, maxY = -1;
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++)
+      if (grid[y][x]) { minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+                        minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+  if (maxX === -1) return { grid: makeBlankGrid(1, 1), width: 1, height: 1 };
+  const newW = maxX - minX + 1;
+  const newH = maxY - minY + 1;
+  const next = makeBlankGrid(newW, newH);
+  for (let y = 0; y < newH; y++)
+    for (let x = 0; x < newW; x++)
+      next[y][x] = grid[y + minY][x + minX];
+  return { grid: next, width: newW, height: newH };
+}
+
+// Expand: add `top`, `right`, `bottom`, `left` px of transparent padding.
+export function expandGrid(grid, width, height, top, right, bottom, left) {
+  const newW = width + left + right;
+  const newH = height + top + bottom;
+  const next = makeBlankGrid(newW, newH);
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++)
+      next[y + top][x + left] = grid[y][x];
+  return { grid: next, width: newW, height: newH };
+}
+
+// Scale: nearest-neighbour resize to targetW × targetH.
+export function scaleGrid(grid, width, height, targetW, targetH) {
+  const next = makeBlankGrid(targetW, targetH);
+  for (let y = 0; y < targetH; y++)
+    for (let x = 0; x < targetW; x++) {
+      const sx = Math.floor(x * width / targetW);
+      const sy = Math.floor(y * height / targetH);
+      next[y][x] = grid[sy][sx];
+    }
+  return { grid: next, width: targetW, height: targetH };
+}
+
 // ---------------- Shared palette ----------------
 
 export const PALETTE = [
