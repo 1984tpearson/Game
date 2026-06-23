@@ -3,7 +3,7 @@ import { saveObject, listObjects, updateObject, deleteObject } from '../lib/obje
 import {
   makeBlankGrid, cloneGrid, setCell, floodFill,
   gridToDataUrl, decodeImageToGrid,
-  jitterColor, darkenColor, blendColor,
+  jitterColor, darkenColor, blendColor, replaceHue,
   brushCells, lineCells, ellipseCells,
   cropGrid, expandGrid, scaleGrid,
 } from '../lib/pixelArt.js';
@@ -110,6 +110,7 @@ export default function ObjectEditor() {
   const [jitterEnabled, setJitterEnabled] = useState(false);
   const [jitterAmount, setJitterAmount] = useState(12);
   const [opacity, setOpacity] = useState(100);
+  const [zoom, setZoom] = useState(ZOOM);
   const [preserveTransparency, setPreserveTransparency] = useState(false);
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
@@ -231,6 +232,15 @@ export default function ObjectEditor() {
       if (isStart) pushHistory(g);
       const existing = g[y]?.[x] ?? null;
       if (tool === 'pencil') return paintCells(g, brushCells(x, y, brushSize));
+      if (tool === 'hue-replace') {
+        let next = g;
+        for (const cell of brushCells(x, y, brushSize)) {
+          const base = strokeBase.current?.[cell.y]?.[cell.x] ?? null;
+          if (!base) continue;
+          next = setCell(next, cell.x, cell.y, replaceHue(base, color, opacity), gridW, gridH);
+        }
+        return next;
+      }
       if (tool === 'eraser') {
         if (preserveTransparency) return g;
         let next = g;
@@ -267,8 +277,8 @@ export default function ObjectEditor() {
   function cellFromEvent(e) {
     const rect = canvasRef.current.getBoundingClientRect();
     return {
-      x: Math.floor((e.clientX - rect.left) / ZOOM),
-      y: Math.floor((e.clientY - rect.top) / ZOOM),
+      x: Math.floor((e.clientX - rect.left) / zoom),
+      y: Math.floor((e.clientY - rect.top) / zoom),
     };
   }
 
@@ -458,8 +468,8 @@ export default function ObjectEditor() {
 
   const canvasStyle = {
     position: 'relative',
-    width: gridW * ZOOM,
-    height: gridH * ZOOM,
+    width: gridW * zoom,
+    height: gridH * zoom,
     background: '#1a1611',
     touchAction: 'none',
     cursor: 'crosshair',
@@ -486,26 +496,26 @@ export default function ObjectEditor() {
             onPointerCancel={handlePointerUp}
           >
             {grid.map((row, y) => row.map((col, x) =>
-              col ? <div key={`c-${x}-${y}`} style={{ position: 'absolute', left: x*ZOOM, top: y*ZOOM,
-                width: ZOOM, height: ZOOM,
+              col ? <div key={`c-${x}-${y}`} style={{ position: 'absolute', left: x*zoom, top: y*zoom,
+                width: zoom, height: zoom,
                 background: col.length === 9
                   ? `rgba(${parseInt(col.slice(1,3),16)},${parseInt(col.slice(3,5),16)},${parseInt(col.slice(5,7),16)},${(parseInt(col.slice(7,9),16)/255).toFixed(3)})`
                   : col,
                 pointerEvents: 'none' }} /> : null
             ))}
             {showGrid && (
-              <svg width={gridW*ZOOM} height={gridH*ZOOM} style={S.gridSvg}>
+              <svg width={gridW*zoom} height={gridH*zoom} style={S.gridSvg}>
                 {Array.from({length: gridW+1}).map((_,i) =>
-                  <line key={`v${i}`} x1={i*ZOOM} y1={0} x2={i*ZOOM} y2={gridH*ZOOM}
+                  <line key={`v${i}`} x1={i*zoom} y1={0} x2={i*zoom} y2={gridH*zoom}
                     stroke="rgba(232,220,196,0.08)" strokeWidth="1" />)}
                 {Array.from({length: gridH+1}).map((_,i) =>
-                  <line key={`h${i}`} x1={0} y1={i*ZOOM} x2={gridW*ZOOM} y2={i*ZOOM}
+                  <line key={`h${i}`} x1={0} y1={i*zoom} x2={gridW*zoom} y2={i*zoom}
                     stroke="rgba(232,220,196,0.08)" strokeWidth="1" />)}
               </svg>
             )}
             {shapePreview?.map(({x, y}, i) =>
-              <div key={`p${i}`} style={{ position: 'absolute', left: x*ZOOM, top: y*ZOOM,
-                width: ZOOM, height: ZOOM, background: color, opacity: 0.6, pointerEvents: 'none' }} />
+              <div key={`p${i}`} style={{ position: 'absolute', left: x*zoom, top: y*zoom,
+                width: zoom, height: zoom, background: color, opacity: 0.6, pointerEvents: 'none' }} />
             )}
           </div>
           <div style={S.canvasLabel}>{gridW}×{gridH} · transparent background shown in game</div>
@@ -523,6 +533,7 @@ export default function ObjectEditor() {
           opacity={opacity} setOpacity={setOpacity}
           preserveTransparency={preserveTransparency} setPreserveTransparency={setPreserveTransparency}
           onUndo={undo} onRedo={redo} onClear={clearAll}
+          zoom={zoom} setZoom={setZoom}
           extraQuickActions={[
             { label: loadedObjId ? `Load obj… (${objName||'…'})` : 'Load obj…', fn: openLibraryPanel },
           ]}

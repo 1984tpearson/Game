@@ -340,6 +340,60 @@ export function scaleGrid(grid, width, height, targetW, targetH) {
   return { grid: next, width: targetW, height: targetH };
 }
 
+// Replaces the hue+saturation of `existingHex` with that of `paintHex`,
+// keeping the existing pixel's lightness so dark stays dark, light stays light.
+// opacity (0-100) blends between original and hue-shifted result.
+// Returns a 6-digit opaque hex string.
+export function replaceHue(existingHex, paintHex, opacity = 100) {
+  if (!existingHex) return blendColor(null, paintHex, opacity);
+
+  // hex -> [r,g,b] 0-255
+  const hexToRgb = (h) => [
+    parseInt(h.slice(1, 3), 16),
+    parseInt(h.slice(3, 5), 16),
+    parseInt(h.slice(5, 7), 16),
+  ];
+
+  // rgb -> hsl  (h: 0-360, s: 0-1, l: 0-1)
+  const rgbToHsl = (r, g, b) => {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, l];
+    const d = max - min;
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    let h = max === r ? (g - b) / d + (g < b ? 6 : 0)
+           : max === g ? (b - r) / d + 2
+           : (r - g) / d + 4;
+    return [h * 60, s, l];
+  };
+
+  // hsl -> rgb
+  const hslToRgb = (h, s, l) => {
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r, g, b;
+    if      (h < 60)  { r = c; g = x; b = 0; }
+    else if (h < 120) { r = x; g = c; b = 0; }
+    else if (h < 180) { r = 0; g = c; b = x; }
+    else if (h < 240) { r = 0; g = x; b = c; }
+    else if (h < 300) { r = x; g = 0; b = c; }
+    else              { r = c; g = 0; b = x; }
+    const toHex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  };
+
+  const [er, eg, eb] = hexToRgb(existingHex);
+  const [pr, pg, pb] = hexToRgb(paintHex);
+  const [eh, es, el] = rgbToHsl(er, eg, eb);
+  const [ph, ps]     = rgbToHsl(pr, pg, pb);
+  // Apply paint H+S to existing L; keep existing S if paint is fully desaturated
+  const shifted = hslToRgb(ph, ps > 0.02 ? ps : es, el);
+  // Respect opacity: blend shifted result against original
+  return blendColor(existingHex, shifted, opacity);
+}
+
 // ---------------- Shared palette ----------------
 
 export const PALETTE = [

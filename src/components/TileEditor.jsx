@@ -3,7 +3,7 @@ import { saveTile, listTiles, updateTile, deleteTile } from '../lib/tiles.js';
 import {
   makeBlankGrid, cloneGrid, setCell, floodFill,
   gridToDataUrl, decodeImageToGrid,
-  jitterColor, darkenColor, blendColor,
+  jitterColor, darkenColor, blendColor, replaceHue,
   brushCells, lineCells, ellipseCells,
   PALETTE, PALETTE_ROW_LABELS,
 } from '../lib/pixelArt.js';
@@ -80,6 +80,7 @@ export default function TileEditor() {
   const [jitterEnabled, setJitterEnabled] = useState(false);
   const [jitterAmount, setJitterAmount] = useState(12);
   const [opacity, setOpacity] = useState(100);
+  const [zoom, setZoom] = useState(ZOOM); // 4,6,8,10,12 — default 8 (ZOOM constant)
   const [preserveTransparency, setPreserveTransparency] = useState(false);
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
@@ -129,6 +130,15 @@ export default function TileEditor() {
       if (isStart) pushHistory(g);
       const existing = g[y]?.[x] ?? null;
       if (tool === 'pencil') return paintCells(g, brushCells(x, y, brushSize));
+      if (tool === 'hue-replace') {
+        let next = g;
+        for (const cell of brushCells(x, y, brushSize)) {
+          const base = strokeBase.current?.[cell.y]?.[cell.x] ?? null;
+          if (!base) continue; // don't paint on transparent
+          next = setCell(next, cell.x, cell.y, replaceHue(base, color, opacity), GRID_W, GRID_H);
+        }
+        return next;
+      }
       if (tool === 'eraser') {
         if (preserveTransparency) return g;
         let next = g;
@@ -165,8 +175,8 @@ export default function TileEditor() {
   function cellFromEvent(e) {
     const rect = canvasRef.current.getBoundingClientRect();
     return {
-      x: Math.floor((e.clientX - rect.left) / ZOOM),
-      y: Math.floor((e.clientY - rect.top) / ZOOM),
+      x: Math.floor((e.clientX - rect.left) / zoom),
+      y: Math.floor((e.clientY - rect.top) / zoom),
     };
   }
 
@@ -325,7 +335,7 @@ export default function TileEditor() {
         <div style={S.canvasWrap}>
           <div
             ref={canvasRef}
-            style={{ position: 'relative', width: GRID_W * ZOOM, height: GRID_H * ZOOM,
+            style={{ position: 'relative', width: GRID_W * zoom, height: GRID_H * zoom,
                      background: '#1a1611', touchAction: 'none', cursor: 'crosshair',
                      border: `1px solid ${C.border}` }}
             onPointerDown={handlePointerDown}
@@ -336,31 +346,31 @@ export default function TileEditor() {
           >
             {showMask && grid.map((row, y) => row.map((_, x) =>
               HEX_MASK[y][x] ? null : (
-                <div key={`m-${x}-${y}`} style={{ ...S.cell, left: x*ZOOM, top: y*ZOOM,
+                <div key={`m-${x}-${y}`} style={{ ...S.cell, width: zoom, height: zoom, left: x*zoom, top: y*zoom,
                   background: 'rgba(0,0,0,0.55)', pointerEvents: 'none' }} />
               )
             ))}
             {grid.map((row, y) => row.map((col, x) =>
-              col ? <div key={`c-${x}-${y}`} style={{ ...S.cell, left: x*ZOOM, top: y*ZOOM,
+              col ? <div key={`c-${x}-${y}`} style={{ ...S.cell, width: zoom, height: zoom, left: x*zoom, top: y*zoom,
                 background: col.length === 9
                   ? `rgba(${parseInt(col.slice(1,3),16)},${parseInt(col.slice(3,5),16)},${parseInt(col.slice(5,7),16)},${(parseInt(col.slice(7,9),16)/255).toFixed(3)})`
                   : col,
                 pointerEvents: 'none' }} /> : null
             ))}
-            <div style={{ ...S.guideLine, top: HEADROOM_H*ZOOM, background: C.brass, opacity: 0.45 }} />
-            <div style={{ ...S.guideLine, top: (HEADROOM_H+TOP_FACE_H)*ZOOM, background: C.rust, opacity: 0.6 }} />
+            <div style={{ ...S.guideLine, top: HEADROOM_H*zoom, background: C.brass, opacity: 0.45 }} />
+            <div style={{ ...S.guideLine, top: (HEADROOM_H+TOP_FACE_H)*zoom, background: C.rust, opacity: 0.6 }} />
             {showGrid && (
-              <svg width={GRID_W*ZOOM} height={GRID_H*ZOOM} style={S.gridSvg}>
+              <svg width={GRID_W*zoom} height={GRID_H*zoom} style={S.gridSvg}>
                 {Array.from({length: GRID_W+1}).map((_,i) =>
-                  <line key={`v${i}`} x1={i*ZOOM} y1={0} x2={i*ZOOM} y2={GRID_H*ZOOM}
+                  <line key={`v${i}`} x1={i*zoom} y1={0} x2={i*zoom} y2={GRID_H*zoom}
                     stroke="rgba(232,220,196,0.08)" strokeWidth="1" />)}
                 {Array.from({length: GRID_H+1}).map((_,i) =>
-                  <line key={`h${i}`} x1={0} y1={i*ZOOM} x2={GRID_W*ZOOM} y2={i*ZOOM}
+                  <line key={`h${i}`} x1={0} y1={i*zoom} x2={GRID_W*zoom} y2={i*zoom}
                     stroke="rgba(232,220,196,0.08)" strokeWidth="1" />)}
               </svg>
             )}
             {shapePreview?.map(({x, y}, i) =>
-              <div key={`p${i}`} style={{ ...S.cell, left: x*ZOOM, top: y*ZOOM,
+              <div key={`p${i}`} style={{ ...S.cell, width: zoom, height: zoom, left: x*zoom, top: y*zoom,
                 background: color, opacity: 0.6, pointerEvents: 'none' }} />
             )}
           </div>
@@ -382,6 +392,7 @@ export default function TileEditor() {
           opacity={opacity} setOpacity={setOpacity}
           preserveTransparency={preserveTransparency} setPreserveTransparency={setPreserveTransparency}
           onUndo={undo} onRedo={redo} onClear={clearAll}
+          zoom={zoom} setZoom={setZoom}
           extraQuickActions={[
             { label: 'Fill outline', fn: fillMaskOutline },
             { label: loadedTileId ? `Load tile… (${tileName || 'untitled'})` : 'Load tile…', fn: openLibraryPanel },
@@ -531,8 +542,9 @@ export function PixelSidebar({
   onViewExport,
   loadedName,
   onStartNew,
-  extraTopControls,    // slot for object-specific controls (size, footprint)
-  hideMaskToggle,      // object mode has no hex mask
+  extraTopControls,
+  hideMaskToggle,
+  zoom, setZoom,  // optional — pixel editors pass these; map editor doesn't
 }) {
   return (
     <div style={S.sidebar}>
@@ -561,11 +573,13 @@ export function PixelSidebar({
               <button key={t} style={{...S.toolBtn, ...(tool===t ? S.toolBtnActive : {})}}
                 onClick={() => setTool(t)}>{label}</button>
             ))}
-            <button style={{...S.toolBtn, ...(tool==='shadow' ? S.toolBtnActive : {}), gridColumn:'span 2'}}
+            <button style={{...S.toolBtn, ...(tool==='shadow' ? S.toolBtnActive : {})}}
               onClick={() => setTool('shadow')}>Shadow</button>
+            <button style={{...S.toolBtn, ...(tool==='hue-replace' ? S.toolBtnActive : {})}}
+              onClick={() => setTool('hue-replace')}>Hue Rep.</button>
           </div>
 
-          {['pencil','eraser','shadow'].includes(tool) && (
+          {['pencil','eraser','shadow','hue-replace'].includes(tool) && (
             <>
               <div style={S.sectionLabel}>brush size</div>
               <div style={S.brushSizeRow}>
@@ -577,13 +591,25 @@ export function PixelSidebar({
             </>
           )}
 
-          {tool === 'pencil' && setOpacity && (
+          {['pencil','hue-replace'].includes(tool) && setOpacity && (
             <>
               <div style={S.sectionLabel}>opacity</div>
               <div style={S.jitterRow}>
                 <input type="range" min="1" max="100" value={opacity}
                   onChange={e => setOpacity(Number(e.target.value))} style={S.jitterSlider} />
                 <span style={S.jitterValue}>{opacity}%</span>
+              </div>
+            </>
+          )}
+
+          {setZoom && (
+            <>
+              <div style={S.sectionLabel}>zoom</div>
+              <div style={S.brushSizeRow}>
+                {[4, 6, 8, 10, 12].map(z => (
+                  <button key={z} style={{...S.brushSizeBtn, ...(zoom===z ? S.toolBtnActive : {})}}
+                    onClick={() => setZoom(z)}>{z}×</button>
+                ))}
               </div>
             </>
           )}

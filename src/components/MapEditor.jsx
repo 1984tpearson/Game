@@ -95,6 +95,7 @@ export default function MapEditor() {
   const [sceneName, setSceneName] = useState("New Scene");
   const [sceneId, setSceneId] = useState("scene_1");
   const [exportStr, setExportStr] = useState("");
+  const [zoom, setZoom] = useState(2); // 1x, 2x, 3x, 4x — default 2x
   const canvasRef = useRef(null);
 
   // Map save/load state
@@ -148,8 +149,8 @@ export default function MapEditor() {
 
   function cellFromEvent(e) {
     const rect = canvasRef.current.getBoundingClientRect();
-    const sx = e.clientX - rect.left;
-    const sy = e.clientY - rect.top;
+    const sx = (e.clientX - rect.left) / zoom;
+    const sy = (e.clientY - rect.top) / zoom;
     return screenToHex(sx, sy);
   }
 
@@ -413,12 +414,20 @@ ${entitiesStr}
 
       <div style={styles.body}>
         <div style={styles.canvasWrap}>
-          <div style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}`, touchAction: "none" }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 10, color: COLORS.textDim }}>zoom</span>
+            {[1, 2, 3, 4].map(z => (
+              <button key={z} onClick={() => setZoom(z)}
+                style={{ ...styles.toolBtn, width: 36, padding: '4px 0',
+                  ...(zoom === z ? styles.toolBtnActive : {}) }}>{z}×</button>
+            ))}
+          </div>
+          <div style={{ position: "relative", width: CANVAS_W * zoom, height: CANVAS_H * zoom, border: `1px solid ${COLORS.border}`, touchAction: "none", overflow: 'hidden' }}>
             {/* Tile art layer: plain HTML <img> tags (not SVG <image>),
                 since SVG <image> with data URIs doesn't render reliably
                 in some browser contexts — matches the approach used in
                 the actual game engine. */}
-            <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W, height: CANVAS_H, pointerEvents: "none" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W * zoom, height: CANVAS_H * zoom, pointerEvents: "none" }}>
               {/* Floor tiles — sorted back-to-front */}
               {[...floor]
                 .sort((a, b) => a[1] - b[1] || a[0] - b[0])
@@ -433,10 +442,10 @@ ${entitiesStr}
                       alt=""
                       style={{
                         position: "absolute",
-                        left: sx - TILE_IMG_W / 2,
-                        top: sy - FACE_H / 2 - TILE_HEADROOM + (yOffset ?? 0),
-                        width: TILE_IMG_W,
-                        height: TILE_IMG_H,
+                        left: (sx - TILE_IMG_W / 2) * zoom,
+                        top: (sy - FACE_H / 2 - TILE_HEADROOM + (yOffset ?? 0)) * zoom,
+                        width: TILE_IMG_W * zoom,
+                        height: TILE_IMG_H * zoom,
                         imageRendering: "pixelated",
                       }}
                     />
@@ -469,10 +478,10 @@ ${entitiesStr}
                       alt={e.label}
                       style={{
                         position: "absolute",
-                        left: sx - dispW / 2,
-                        top: sy - dispH + 6 + floorYOffset,
-                        width: dispW,
-                        height: dispH,
+                        left: (sx - dispW / 2) * zoom,
+                        top: (sy - dispH + 6 + floorYOffset) * zoom,
+                        width: dispW * zoom,
+                        height: dispH * zoom,
                         imageRendering: "pixelated",
                         outline: isSelected ? `2px solid ${COLORS.brass}` : "none",
                         opacity: isSelected ? 1 : 0.92,
@@ -484,8 +493,8 @@ ${entitiesStr}
 
             <svg
               ref={canvasRef}
-              width={CANVAS_W}
-              height={CANVAS_H}
+              width={CANVAS_W * zoom}
+              height={CANVAS_H * zoom}
               style={{ position: "absolute", top: 0, left: 0, background: "transparent", cursor: "crosshair", touchAction: "none" }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
@@ -496,21 +505,18 @@ ${entitiesStr}
               {entities.map((e) => {
                 const { sx, sy } = hexToScreen(e.q, e.r);
                 const isSelected = e.id === selectedEntityId;
-                // Entities with object images: only show the marker circle
-                // when selected (so you can see/click the selection state).
-                // Otherwise the image itself is the visual — no circle on top.
                 if (e.objectId && !isSelected) return null;
                 return (
                   <g key={e.id}>
                     <circle
-                      cx={sx}
-                      cy={sy}
-                      r="9"
+                      cx={sx * zoom}
+                      cy={sy * zoom}
+                      r={9 * zoom}
                       fill={e.color}
                       stroke={isSelected ? COLORS.brass : "#000"}
                       strokeWidth={isSelected ? 2 : 1}
                     />
-                    <text x={sx} y={sy - 16} fontSize="8.5" fill={COLORS.text} textAnchor="middle" fontFamily="monospace">
+                    <text x={sx * zoom} y={(sy - 16) * zoom} fontSize={8.5 * zoom} fill={COLORS.text} textAnchor="middle" fontFamily="monospace">
                       {e.label}
                     </text>
                   </g>
@@ -522,7 +528,7 @@ ${entitiesStr}
                 return (
                   <polygon
                     key="spawn-marker"
-                    points={`${sx},${sy - 10} ${sx - 7},${sy + 5} ${sx + 7},${sy + 5}`}
+                    points={`${sx*zoom},${(sy-10)*zoom} ${(sx-7)*zoom},${(sy+5)*zoom} ${(sx+7)*zoom},${(sy+5)*zoom}`}
                     fill={COLORS.brass}
                     opacity="0.9"
                   />
