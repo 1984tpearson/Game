@@ -581,19 +581,23 @@ function HexEngine({
                 );
               })}
 
-              {/* Player — always at canvas center */}
+              {/* Player — always at canvas center, offset by current tile's yOffset */}
               {(() => {
                 const spriteW = 116;
                 const spriteH = 116;
                 const spriteFeetOffset = 31;
+                const currentTileYOffset = (() => {
+                  const cell = scene.floor.find(([fq, fr]) => fq === playerPos.q && fr === playerPos.r);
+                  return cell?.[3] ?? 0;
+                })();
                 const spriteUrl = `${import.meta.env.BASE_URL}characters/player/skinny_half_man_half_rat/${playerFacing}.png`;
                 return (
                   <g>
-                    <ellipse cx={centerX} cy={centerY - 6} rx="10" ry="4" fill="#000" opacity="0.45" />
+                    <ellipse cx={centerX} cy={centerY - 6 + currentTileYOffset} rx="10" ry="4" fill="#000" opacity="0.45" />
                     <image
                       href={spriteUrl}
                       x={centerX - spriteW / 2}
-                      y={centerY - spriteH + spriteFeetOffset}
+                      y={centerY - spriteH + spriteFeetOffset + currentTileYOffset}
                       width={spriteW}
                       height={spriteH}
                       style={{ imageRendering: "pixelated" }}
