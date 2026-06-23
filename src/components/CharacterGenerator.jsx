@@ -190,7 +190,7 @@ export default function CharacterGenerator() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: description.trim(),
-          image_size: { width: 64, height: 64 }, no_background: true }),
+          image_size: { width: 64, height: 64 }, no_background: true, view: 'low top-down' }),
       });
       const job = await res.json();
       if (!job.background_job_id) throw new Error(job.error || 'No job ID');
