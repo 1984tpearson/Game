@@ -99,6 +99,7 @@ export default function TileEditor() {
 
   const isDrawing = useRef(false);
   const shadowedThisStroke = useRef(new Set());
+  const strokeBase = useRef(null);
   const shapeStart = useRef(null);
   const [shapePreview, setShapePreview] = useState(null);
   const canvasRef = useRef(null);
@@ -114,9 +115,10 @@ export default function TileEditor() {
     for (const { x, y } of cells) {
       let paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
       if (preserveTransparency && (next[y]?.[x] ?? null) === null) continue;
-      // Blend against existing pixel if opacity < 100; result is always opaque.
-      const existing = next[y]?.[x] ?? null;
-      paintColor = blendColor(existing, paintColor, opacity);
+      // Blend against the stroke-start snapshot so repeated pixels within
+      // a single stroke don't compound — matches shadow tool behaviour.
+      const base = strokeBase.current?.[y]?.[x] ?? null;
+      paintColor = blendColor(base, paintColor, opacity);
       next = setCell(next, x, y, paintColor, GRID_W, GRID_H);
     }
     return next;
@@ -178,6 +180,7 @@ export default function TileEditor() {
       return;
     }
     isDrawing.current = true;
+    strokeBase.current = grid.map(row => [...row]); // snapshot for blend baseline
     shadowedThisStroke.current = new Set();
     applyTool(x, y, true);
   }

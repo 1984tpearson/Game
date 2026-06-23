@@ -144,6 +144,7 @@ export default function ObjectEditor() {
 
   const isDrawing = useRef(false);
   const shadowedThisStroke = useRef(new Set());
+  const strokeBase = useRef(null);
   const shapeStart = useRef(null);
   const [shapePreview, setShapePreview] = useState(null);
   const canvasRef = useRef(null);
@@ -218,8 +219,8 @@ export default function ObjectEditor() {
     for (const { x, y } of cells) {
       let paintColor = jitterEnabled ? jitterColor(color, jitterAmount) : color;
       if (preserveTransparency && (next[y]?.[x] ?? null) === null) continue;
-      const existing = next[y]?.[x] ?? null;
-      paintColor = blendColor(existing, paintColor, opacity);
+      const base = strokeBase.current?.[y]?.[x] ?? null;
+      paintColor = blendColor(base, paintColor, opacity);
       next = setCell(next, x, y, paintColor, gridW, gridH);
     }
     return next;
@@ -281,6 +282,7 @@ export default function ObjectEditor() {
       return;
     }
     isDrawing.current = true;
+    strokeBase.current = grid.map(row => [...row]);
     shadowedThisStroke.current = new Set();
     applyTool(x, y, true);
   }
