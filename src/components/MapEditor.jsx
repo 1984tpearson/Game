@@ -433,7 +433,7 @@ ${entitiesStr}
                   ...(zoom === z ? styles.toolBtnActive : {}) }}>{z}×</button>
             ))}
           </div>
-          <div style={{ position: "relative", width: CANVAS_W * zoom, height: CANVAS_H * zoom, border: `1px solid ${COLORS.border}`, touchAction: "none", overflow: 'hidden' }}>
+          <div style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}`, touchAction: "none", overflow: 'auto' }}>
             {/* Tile art layer: plain HTML <img> tags (not SVG <image>),
                 since SVG <image> with data URIs doesn't render reliably
                 in some browser contexts — matches the approach used in
