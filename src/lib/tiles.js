@@ -7,7 +7,7 @@ import { supabase } from './supabase.js';
 export async function listTiles() {
   const { data, error } = await supabase
     .from('tiles')
-    .select('id, name, image_data_url, default_y_offset, created_at, updated_at')
+    .select('id, name, image_data_url, default_y_offset, walkable, created_at, updated_at')
     .order('updated_at', { ascending: false });
   if (error) throw error;
   return data;
@@ -25,29 +25,30 @@ export async function getTilesByIds(ids) {
   if (uniqueIds.length === 0) return {};
   const { data, error } = await supabase
     .from('tiles')
-    .select('id, image_data_url')
+    .select('id, image_data_url, walkable')
     .in('id', uniqueIds);
   if (error) throw error;
   const map = {};
-  for (const row of data) map[row.id] = row.image_data_url;
+  for (const row of data) map[row.id] = { imageDataUrl: row.image_data_url, walkable: row.walkable ?? true };
   return map;
 }
 
-export async function saveTile({ name, imageDataUrl, defaultYOffset = 0 }) {
+export async function saveTile({ name, imageDataUrl, defaultYOffset = 0, walkable = true }) {
   const { data, error } = await supabase
     .from('tiles')
-    .insert({ name, image_data_url: imageDataUrl, default_y_offset: defaultYOffset })
+    .insert({ name, image_data_url: imageDataUrl, default_y_offset: defaultYOffset, walkable })
     .select()
     .single();
   if (error) throw error;
   return data;
 }
 
-export async function updateTile(id, { name, imageDataUrl, defaultYOffset }) {
+export async function updateTile(id, { name, imageDataUrl, defaultYOffset, walkable }) {
   const patch = { updated_at: new Date().toISOString() };
   if (name !== undefined) patch.name = name;
   if (imageDataUrl !== undefined) patch.image_data_url = imageDataUrl;
   if (defaultYOffset !== undefined) patch.default_y_offset = defaultYOffset;
+  if (walkable !== undefined) patch.walkable = walkable;
   const { data, error } = await supabase
     .from('tiles')
     .update(patch)

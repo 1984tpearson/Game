@@ -374,15 +374,25 @@ function HexEngine({
     // Check if there's an entity there
     const targetEntity = entities.find(e => e.trigger === "enter" && entityOccupiesTile(e, tq, tr));
 
-    // Build blocked set: blocksMovement entities + trigger tiles,
+    // Build blocked set: non-walkable tiles + blocksMovement entities + trigger tiles,
     // but exclude the goal tile so the player can walk directly onto it when clicked.
     const goalKey = hexKey(tq, tr);
-    const blockedSet = new Set(
-      entities
-        .filter(e => e.blocksMovement || e.trigger === "enter")
-        .flatMap(e => entityTiles(e).map(t => hexKey(t.q, t.r)))
+
+    // Non-walkable floor tiles from the tile library
+    const nonWalkableTileKeys = new Set(
+      scene.floor
+        .filter(([fq, fr, tileId]) => tileId && resolvedTiles[tileId]?.walkable === false)
+        .map(([fq, fr]) => hexKey(fq, fr))
         .filter(k => k !== goalKey)
     );
+
+    const blockedSet = new Set([
+      ...nonWalkableTileKeys,
+      ...entities
+        .filter(e => e.blocksMovement || e.trigger === "enter")
+        .flatMap(e => entityTiles(e).map(t => hexKey(t.q, t.r)))
+        .filter(k => k !== goalKey),
+    ]);
 
     const cur = playerPosRef.current;
     // If clicking current tile, do nothing
@@ -392,12 +402,13 @@ function HexEngine({
     // If no path exists, fall back to treating trigger tiles as passable.
     let path = hexAstarClean(cur.q, cur.r, tq, tr, floor, blockedSet);
     if (!path || path.length === 0) {
-      const blockedSetNoTriggers = new Set(
-        entities
+      const blockedSetNoTriggers = new Set([
+        ...nonWalkableTileKeys,
+        ...entities
           .filter(e => e.blocksMovement)
           .flatMap(e => entityTiles(e).map(t => hexKey(t.q, t.r)))
-          .filter(k => k !== goalKey)
-      );
+          .filter(k => k !== goalKey),
+      ]);
       path = hexAstarClean(cur.q, cur.r, tq, tr, floor, blockedSetNoTriggers);
     }
     if (!path || path.length === 0) return;
@@ -516,7 +527,7 @@ function HexEngine({
               {tiles.map(({ q, r, tileId, yOffset }) => {
                 const { sx, sy } = hexToScreen(q, r, camX, camY, stepX, stepY);
                 const isMarked = isTileOccupied(q, r);
-                const img = (tileId && resolvedTiles[tileId]) || T.tileImg;
+                const img = (tileId && resolvedTiles[tileId]?.imageDataUrl) || T.tileImg;
                 return (
                   <img
                     key={`${q}-${r}`}

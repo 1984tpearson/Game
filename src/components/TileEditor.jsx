@@ -88,6 +88,7 @@ export default function TileEditor() {
   const [exportImg, setExportImg] = useState(null);
   const [tileName, setTileName] = useState('');
   const [tileDefaultYOffset, setTileDefaultYOffset] = useState(0); // -6 | 0 | 6
+  const [tileWalkable, setTileWalkable] = useState(true);
   const [saveStatus, setSaveStatus] = useState(null);
   const [saveError, setSaveError] = useState(null);
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
@@ -274,9 +275,9 @@ export default function TileEditor() {
     setSaveStatus('saving'); setSaveError(null);
     try {
       if (loadedTileId && !forceNew) {
-        await updateTile(loadedTileId, { name: tileName.trim(), imageDataUrl: exportImg, defaultYOffset: tileDefaultYOffset });
+        await updateTile(loadedTileId, { name: tileName.trim(), imageDataUrl: exportImg, defaultYOffset: tileDefaultYOffset, walkable: tileWalkable });
       } else {
-        const created = await saveTile({ name: tileName.trim(), imageDataUrl: exportImg, defaultYOffset: tileDefaultYOffset });
+        const created = await saveTile({ name: tileName.trim(), imageDataUrl: exportImg, defaultYOffset: tileDefaultYOffset, walkable: tileWalkable });
         setLoadedTileId(created.id);
       }
       setSaveStatus('saved');
@@ -309,6 +310,7 @@ export default function TileEditor() {
       setLoadedTileId(tile.id);
       setTileName(tile.name);
       setTileDefaultYOffset(tile.default_y_offset ?? 0);
+      setTileWalkable(tile.walkable ?? true);
       setLibraryPanelOpen(false);
       setExportImg(null); setExportStr(''); setSaveStatus(null);
     } catch (e) { setTileLibraryError(e.message || 'Failed to load tile.'); }
@@ -318,7 +320,7 @@ export default function TileEditor() {
   function startNew() {
     pushHistory(grid);
     setGrid(makeBlankGrid(GRID_W, GRID_H));
-    setLoadedTileId(null); setTileName(''); setTileDefaultYOffset(0);
+    setLoadedTileId(null); setTileName(''); setTileDefaultYOffset(0); setTileWalkable(true);
     setExportImg(null); setExportStr(''); setSaveStatus(null);
   }
 
@@ -431,6 +433,18 @@ export default function TileEditor() {
                 key={val}
                 style={{ ...S.toolBtn, flex: 1, ...(tileDefaultYOffset === val ? S.toolBtnActive : {}) }}
                 onClick={() => setTileDefaultYOffset(val)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={S.sectionLabel}>walkability</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[[true, '✓ walkable'], [false, '✗ not walkable']].map(([val, label]) => (
+              <button
+                key={String(val)}
+                style={{ ...S.toolBtn, flex: 1, ...(tileWalkable === val ? S.toolBtnActive : {}), ...(!val && tileWalkable === false ? { borderColor: C.rust, color: C.rust } : {}) }}
+                onClick={() => setTileWalkable(val)}
               >
                 {label}
               </button>
