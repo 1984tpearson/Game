@@ -250,12 +250,8 @@ function HexEngine({
   renderOverlay,
   headerTitle,
   headerSubtitle,
-  resolveTiles, // OPTIONAL: async (ids: string[]) => {id: imageDataUrl}.
-                // If provided, called whenever a scene's floor references
-                // tile IDs not yet resolved, to fetch their art from
-                // wherever the config's tile library lives. The engine
-                // itself has no database dependency — this keeps that
-                // generic, same pattern as generateScene.
+  resolveTiles,
+  playerSprites, // OPTIONAL: {south, north, east, west, ...} base64 data URLs from character builder
 }) {
   const [sceneId, setSceneId] = useState(startScene);
   const [scenes, setScenes] = useState(initialScenes);
@@ -607,7 +603,9 @@ function HexEngine({
                   const cell = scene.floor.find(([fq, fr]) => fq === playerPos.q && fr === playerPos.r);
                   return cell?.[3] ?? 0;
                 })();
-                const spriteUrl = `${import.meta.env.BASE_URL}characters/player/skinny_half_man_half_rat/${playerFacing}.png`;
+                const spriteUrl = (playerSprites && playerSprites[playerFacing])
+                  ? playerSprites[playerFacing]
+                  : `${import.meta.env.BASE_URL}characters/player/skinny_half_man_half_rat/${playerFacing}.png`;
                 return (
                   <g>
                     <ellipse cx={centerX} cy={centerY - 6 + currentTileYOffset} rx="10" ry="4" fill="#000" opacity="0.45" />
@@ -866,7 +864,7 @@ Generate exactly 2 npcs.`;
 // MAIN GAME COMPONENT
 // =====================================================================
 
-export default function WreckAndRuin({ scenes: propScenes, startScene: propStartScene }) {
+export default function WreckAndRuin({ scenes: propScenes, startScene: propStartScene, playerSprites }) {
   // Use scenes/startScene from props (loaded from DB by GamePage) if provided,
   // otherwise fall back to the hardcoded SCENES for local dev convenience.
   const resolvedScenes = propScenes || SCENES;
@@ -978,6 +976,7 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
       }
       resolveTiles={getTilesByIds}
       renderOverlay={renderOverlay}
+      playerSprites={playerSprites || null}
       headerSubtitle="hex D-pad below · walk onto things to interact"
     />
   );
