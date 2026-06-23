@@ -336,7 +336,11 @@ export default function TileEditor() {
           <div
             ref={canvasRef}
             style={{ position: 'relative', width: GRID_W * zoom, height: GRID_H * zoom,
-                     background: '#1a1611', touchAction: 'none', cursor: 'crosshair',
+                     background: '#2a2a2a',
+                     backgroundImage: 'linear-gradient(45deg, #3a3a3a 25%, transparent 25%), linear-gradient(-45deg, #3a3a3a 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #3a3a3a 75%), linear-gradient(-45deg, transparent 75%, #3a3a3a 75%)',
+                     backgroundSize: `${zoom * 4}px ${zoom * 4}px`,
+                     backgroundPosition: `0 0, 0 ${zoom * 2}px, ${zoom * 2}px ${-zoom * 2}px, ${-zoom * 2}px 0px`,
+                     touchAction: 'none', cursor: 'crosshair',
                      border: `1px solid ${C.border}` }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -508,7 +512,11 @@ export function ExportPreview({ img, w, h }) {
       <div>
         <div style={S.exportLabel}>6× preview</div>
         <img src={img} alt="zoomed" style={{width:w*6, height:h*6, imageRendering:'pixelated',
-          border:`1px solid ${C.border}`, background:'#0c0a08'}} />
+          border:`1px solid ${C.border}`,
+          background:'#2a2a2a',
+          backgroundImage:'linear-gradient(45deg,#3a3a3a 25%,transparent 25%),linear-gradient(-45deg,#3a3a3a 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#3a3a3a 75%),linear-gradient(-45deg,transparent 75%,#3a3a3a 75%)',
+          backgroundSize:'12px 12px',
+          backgroundPosition:'0 0,0 6px,6px -6px,-6px 0'}} />
       </div>
     </div>
   );
