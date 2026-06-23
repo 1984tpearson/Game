@@ -271,6 +271,12 @@ function HexEngine({
   const entities = scene.entities || [];
 
   const T = theme;
+  const stepX = T.tileImgW;
+  const stepY = (T.tileImgH - T.tileSkirt - (T.tileHeadroom || 0)) * 0.75;
+  const CANVAS_W = 320;
+  const CANVAS_H = 220;
+  const centerX = CANVAS_W / 2;
+  const centerY = CANVAS_H / 2;
 
   // ---------------- Tile resolution ----------------
   // Floor cells can be [q, r] (default art) or [q, r, tileId] (a specific
@@ -302,6 +308,11 @@ function HexEngine({
 
   // ---------------- Movement ----------------
 
+  const walkTimerRef = useRef(null);
+  const pathRef = useRef([]);
+  const playerPosRef = useRef(playerPos);
+  useEffect(() => { playerPosRef.current = playerPos; }, [playerPos]);
+
   // Map hex direction names to sprite filenames (6 dirs -> 8 sprites)
   const DIR_TO_SPRITE = {
     E:  "east",
@@ -312,33 +323,78 @@ function HexEngine({
     SW: "west",
   };
 
-  const tryMove = useCallback(
-    (dirName) => {
-      const dir = HEX_DIRS.find((d) => d.name === dirName);
-      if (!dir) return;
-      setPlayerPos((prev) => {
-        const nq = prev.q + dir.dq;
-        const nr = prev.r + dir.dr;
-        if (!floor.has(hexKey(nq, nr))) return prev;
-        const blocked = entities.some(
-          (e) => e.blocksMovement && entityOccupiesTile(e, nq, nr)
-        );
-        if (blocked) return prev;
-        setPlayerFacing(DIR_TO_SPRITE[dirName] || "south");
-        return { q: nq, r: nr };
-      });
-    },
-    [floor, entities]
-  );
+  // Stop any in-progress walk
+  function cancelWalk() {
+    if (walkTimerRef.current) {
+      clearInterval(walkTimerRef.current);
+      walkTimerRef.current = null;
+    }
+    pathRef.current = [];
+  }
 
-  function step(dir) {
+  // Start walking along a path
+  function startWalk(path, onArrive) {
+    cancelWalk();
+    pathRef.current = path;
+    walkTimerRef.current = setInterval(() => {
+      const next = pathRef.current.shift();
+      if (!next) {
+        cancelWalk();
+        if (onArrive) onArrive();
+        return;
+      }
+      const cur = playerPosRef.current;
+      const dirName = dirBetween(cur.q, cur.r, next.q, next.r);
+      if (dirName) setPlayerFacing(DIR_TO_SPRITE[dirName] || "south");
+      setPlayerPos({ q: next.q, r: next.r });
+      if (pathRef.current.length === 0) {
+        cancelWalk();
+        if (onArrive) onArrive();
+      }
+    }, 150);
+  }
+
+  // Handle click on canvas: convert pixel -> hex -> pathfind -> walk
+  function handleCanvasClick(e) {
     if (overlay) return;
-    tryMove(dir);
+    cancelWalk();
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Canvas is scaled 2x so divide pixel offset by 2
+    const px = (e.clientX - rect.left) / 2;
+    const py = (e.clientY - rect.top) / 2;
+    // camX/camY at current player pos
+    const ps = hexToScreen(playerPosRef.current.q, playerPosRef.current.r, 0, 0, stepX, stepY);
+    const cx = centerX - ps.sx;
+    const cy = centerY - ps.sy;
+    const { q: tq, r: tr } = screenToHex(px, py, cx, cy, stepX, stepY);
+
+    // Check if clicked tile is on the floor
+    if (!floor.has(hexKey(tq, tr))) return;
+
+    // Check if there's an entity there
+    const targetEntity = entities.find(e => e.trigger === "enter" && entityOccupiesTile(e, tq, tr));
+
+    // Build blocked set: blocksMovement entities, excluding the target if it's walkable
+    const blockedSet = new Set(
+      entities
+        .filter(e => e.blocksMovement)
+        .flatMap(e => entityTiles(e).map(t => hexKey(t.q, t.r)))
+    );
+
+    const cur = playerPosRef.current;
+    // If clicking current tile, do nothing
+    if (tq === cur.q && tr === cur.r) return;
+
+    const path = hexAstarClean(cur.q, cur.r, tq, tr, floor, blockedSet);
+    if (!path || path.length === 0) return;
+
+    startWalk(path, null);
   }
 
   // ---------------- Scene transitions ----------------
 
   async function enterScene(targetSceneId, spawnOverride) {
+    cancelWalk();
     const target = scenes[targetSceneId];
     if (target.generative && !target.generated) {
       setSceneLoading(true);
@@ -398,15 +454,6 @@ function HexEngine({
 
   // ---------------- Render ----------------
 
-  // Canvas is 320x220 pre-scale (renders at 640x440 at 2x).
-  // Player is always drawn at the canvas center; the map scrolls behind them.
-  const CANVAS_W = 320;
-  const CANVAS_H = 220;
-  const centerX = CANVAS_W / 2;
-  const centerY = CANVAS_H / 2;
-
-  const stepX = T.tileImgW;
-  const stepY = (T.tileImgH - T.tileSkirt - (T.tileHeadroom || 0)) * 0.75;
   const faceH = T.tileImgH - T.tileSkirt - (T.tileHeadroom || 0);
   const headroom = T.tileHeadroom || 0;
 
@@ -445,7 +492,10 @@ function HexEngine({
 
       <div style={baseStyles.gameArea}>
         {/* Canvas: 320x220 logical, scaled 2x to 640x440, overflow hidden */}
-        <div style={{ width: CANVAS_W * 2, height: CANVAS_H * 2, overflow: "hidden", position: "relative", imageRendering: "pixelated" }}>
+        <div
+          style={{ width: CANVAS_W * 2, height: CANVAS_H * 2, overflow: "hidden", position: "relative", imageRendering: "pixelated", cursor: "pointer" }}
+          onClick={handleCanvasClick}
+        >
           <div style={{ width: CANVAS_W, height: CANVAS_H, transform: "scale(2)", transformOrigin: "top left", position: "relative", overflow: "hidden" }}>
             {/* Tile layer */}
             <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W, height: CANVAS_H }}>
@@ -527,22 +577,6 @@ function HexEngine({
                 );
               })()}
             </svg>
-          </div>
-        </div>
-
-        {/* 6-directional hex D-pad */}
-        <div style={baseStyles.hexpad}>
-          <div style={baseStyles.hexpadRow}>
-            <button style={hexBtnStyle(T)} onClick={() => step("NW")}>NW</button>
-            <button style={hexBtnStyle(T)} onClick={() => step("NE")}>NE</button>
-          </div>
-          <div style={baseStyles.hexpadRow}>
-            <button style={hexBtnStyle(T)} onClick={() => step("W")}>W</button>
-            <button style={hexBtnStyle(T)} onClick={() => step("E")}>E</button>
-          </div>
-          <div style={baseStyles.hexpadRow}>
-            <button style={hexBtnStyle(T)} onClick={() => step("SW")}>SW</button>
-            <button style={hexBtnStyle(T)} onClick={() => step("SE")}>SE</button>
           </div>
         </div>
       </div>
