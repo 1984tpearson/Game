@@ -324,12 +324,23 @@ function HexEngine({
 
   // ---------------- Render ----------------
 
-  const originX = 300;
-  const originY = 90;
+  // Canvas is 320x220 pre-scale (renders at 640x440 at 2x).
+  // Player is always drawn at the canvas center; the map scrolls behind them.
+  const CANVAS_W = 320;
+  const CANVAS_H = 220;
+  const centerX = CANVAS_W / 2;
+  const centerY = CANVAS_H / 2;
+
   const stepX = T.tileImgW;
   const stepY = (T.tileImgH - T.tileSkirt - (T.tileHeadroom || 0)) * 0.75;
   const faceH = T.tileImgH - T.tileSkirt - (T.tileHeadroom || 0);
   const headroom = T.tileHeadroom || 0;
+
+  // Player's position in unshifted hex-space
+  const playerScreen = hexToScreen(playerPos.q, playerPos.r, 0, 0, stepX, stepY);
+  // Everything is offset so the player's hex lands on (centerX, centerY)
+  const camX = centerX - playerScreen.sx;
+  const camY = centerY - playerScreen.sy;
 
   const tiles = scene.floor
     .map(([q, r, tileId, yOffset]) => ({ q, r, tileId, yOffset: yOffset ?? 0 }))
@@ -359,93 +370,90 @@ function HexEngine({
       )}
 
       <div style={baseStyles.gameArea}>
-        <div style={{ position: "relative", width: 640, height: 440, transform: "scale(2)", transformOrigin: "top left", marginBottom: 440 }}>
-          {/* Tile layer: plain HTML <img> tags, absolutely positioned, */}
-          {/* drawn back-to-front so each tile's "skirt" gets covered by */}
-          {/* the tile in front of it. SVG <image> with data URIs doesn't */}
-          {/* render in some sandboxed contexts, hence plain <img> here. */}
-          <div style={{ position: "absolute", top: 0, left: 0, width: 640, height: 440 }}>
-            {tiles.map(({ q, r, tileId, yOffset }) => {
-              const { sx, sy } = hexToScreen(q, r, originX, originY, stepX, stepY);
-              const isMarked = isTileOccupied(q, r);
-              const img = (tileId && resolvedTiles[tileId]) || T.tileImg;
-              return (
-                <img
-                  key={`${q}-${r}`}
-                  src={img}
-                  alt=""
-                  style={{
-                    position: "absolute",
-                    left: sx - T.tileImgW / 2,
-                    top: sy - faceH / 2 - headroom + yOffset,
-                    width: T.tileImgW,
-                    height: T.tileImgH,
-                    opacity: isMarked ? 1 : 0.88,
-                    pointerEvents: "none",
-                    imageRendering: "pixelated",
-                  }}
-                />
-              );
-            })}
-          </div>
+        {/* Canvas: 320x220 logical, scaled 2x to 640x440, overflow hidden */}
+        <div style={{ width: CANVAS_W * 2, height: CANVAS_H * 2, overflow: "hidden", position: "relative", imageRendering: "pixelated" }}>
+          <div style={{ width: CANVAS_W, height: CANVAS_H, transform: "scale(2)", transformOrigin: "top left", position: "relative", overflow: "hidden" }}>
+            {/* Tile layer */}
+            <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W, height: CANVAS_H }}>
+              {tiles.map(({ q, r, tileId, yOffset }) => {
+                const { sx, sy } = hexToScreen(q, r, camX, camY, stepX, stepY);
+                const isMarked = isTileOccupied(q, r);
+                const img = (tileId && resolvedTiles[tileId]) || T.tileImg;
+                return (
+                  <img
+                    key={`${q}-${r}`}
+                    src={img}
+                    alt=""
+                    style={{
+                      position: "absolute",
+                      left: sx - T.tileImgW / 2,
+                      top: sy - faceH / 2 - headroom + yOffset,
+                      width: T.tileImgW,
+                      height: T.tileImgH,
+                      opacity: isMarked ? 1 : 0.88,
+                      pointerEvents: "none",
+                      imageRendering: "pixelated",
+                    }}
+                  />
+                );
+              })}
+            </div>
 
-          <svg
-            width="640"
-            height="440"
-            style={{ position: "absolute", top: 0, left: 0, background: "transparent" }}
-          >
-            {/* Entity markers — exits get a translucent hex highlight,
-                everything else gets a colored dot. Multi-tile entities
-                draw their marker centered on the anchor tile only. */}
-            {entities.map((e) => {
-              const { sx, sy } = hexToScreen(e.q, e.r, originX, originY, stepX, stepY);
-              if (e.kind === "exit") {
+            <svg
+              width={CANVAS_W}
+              height={CANVAS_H}
+              style={{ position: "absolute", top: 0, left: 0, background: "transparent", overflow: "visible" }}
+            >
+              {/* Entity markers */}
+              {entities.map((e) => {
+                const { sx, sy } = hexToScreen(e.q, e.r, camX, camY, stepX, stepY);
+                if (e.kind === "exit") {
+                  return (
+                    <g key={e.id}>
+                      <polygon
+                        points={pointsToStr(hexOutlinePoints(sx, sy, T.tileImgW / 2))}
+                        fill={e.color || T.colors.text}
+                        opacity="0.25"
+                      />
+                      <text x={sx} y={sy - 18} fontSize="8.5" fill={T.colors.text} textAnchor="middle" fontFamily="monospace">
+                        {e.label}
+                      </text>
+                    </g>
+                  );
+                }
                 return (
                   <g key={e.id}>
-                    <polygon
-                      points={pointsToStr(hexOutlinePoints(sx, sy, T.tileImgW / 2))}
-                      fill={e.color || T.colors.text}
-                      opacity="0.25"
-                    />
+                    <ellipse cx={sx} cy={sy + 4} rx="9" ry="4" fill="#000" opacity="0.35" />
+                    <circle cx={sx} cy={sy - 4} r="7" fill={e.color || T.colors.accent} opacity="0.9" />
                     <text x={sx} y={sy - 18} fontSize="8.5" fill={T.colors.text} textAnchor="middle" fontFamily="monospace">
                       {e.label}
                     </text>
                   </g>
                 );
-              }
-              return (
-                <g key={e.id}>
-                  <ellipse cx={sx} cy={sy + 4} rx="9" ry="4" fill="#000" opacity="0.35" />
-                  <circle cx={sx} cy={sy - 4} r="7" fill={e.color || T.colors.accent} opacity="0.9" />
-                  <text x={sx} y={sy - 18} fontSize="8.5" fill={T.colors.text} textAnchor="middle" fontFamily="monospace">
-                    {e.label}
-                  </text>
-                </g>
-              );
-            })}
+              })}
 
-            {/* Player */}
-            {(() => {
-              const { sx, sy } = hexToScreen(playerPos.q, playerPos.r, originX, originY, stepX, stepY);
-              const spriteW = 116;
-              const spriteH = 116;
-              const spriteFeetOffset = 31; // empty px below feet in the sprite
-              const spriteUrl = `${import.meta.env.BASE_URL}characters/player/skinny_half_man_half_rat/${playerFacing}.png`;
-              return (
-                <g>
-                  <ellipse cx={sx} cy={sy + 6} rx="10" ry="4" fill="#000" opacity="0.45" />
-                  <image
-                    href={spriteUrl}
-                    x={sx - spriteW / 2}
-                    y={sy - spriteH + spriteFeetOffset}
-                    width={spriteW}
-                    height={spriteH}
-                    style={{ imageRendering: "pixelated" }}
-                  />
-                </g>
-              );
-            })()}
-          </svg>
+              {/* Player — always at canvas center */}
+              {(() => {
+                const spriteW = 116;
+                const spriteH = 116;
+                const spriteFeetOffset = 31;
+                const spriteUrl = `${import.meta.env.BASE_URL}characters/player/skinny_half_man_half_rat/${playerFacing}.png`;
+                return (
+                  <g>
+                    <ellipse cx={centerX} cy={centerY - 6} rx="10" ry="4" fill="#000" opacity="0.45" />
+                    <image
+                      href={spriteUrl}
+                      x={centerX - spriteW / 2}
+                      y={centerY - spriteH + spriteFeetOffset}
+                      width={spriteW}
+                      height={spriteH}
+                      style={{ imageRendering: "pixelated" }}
+                    />
+                  </g>
+                );
+              })()}
+            </svg>
+          </div>
         </div>
 
         {/* 6-directional hex D-pad */}
