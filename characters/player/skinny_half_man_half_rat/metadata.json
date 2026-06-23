@@ -1,0 +1,36 @@
+{
+  "group_id": null,
+  "states": [
+    {
+      "character": {
+        "id": "78515a8f-05b9-4fb0-a63b-27ee9f518632",
+        "name": "skinny half man half rat",
+        "prompt": "skinny half man half rat wearing rags",
+        "size": {
+          "width": 116,
+          "height": 116
+        },
+        "template_id": "mannequin",
+        "directions": 8,
+        "view": "low top-down",
+        "created_at": "2026-06-22T06:49:33.829666+00:00"
+      },
+      "folder": "skinny_half_man_half_rat",
+      "frames": {
+        "rotations": {
+          "south": "skinny_half_man_half_rat/rotations/south.png",
+          "south-east": "skinny_half_man_half_rat/rotations/south-east.png",
+          "east": "skinny_half_man_half_rat/rotations/east.png",
+          "north-east": "skinny_half_man_half_rat/rotations/north-east.png",
+          "north": "skinny_half_man_half_rat/rotations/north.png",
+          "north-west": "skinny_half_man_half_rat/rotations/north-west.png",
+          "west": "skinny_half_man_half_rat/rotations/west.png",
+          "south-west": "skinny_half_man_half_rat/rotations/south-west.png"
+        },
+        "animations": {}
+      }
+    }
+  ],
+  "export_version": "3.0",
+  "export_date": "2026-06-22T06:52:28.371362"
+}

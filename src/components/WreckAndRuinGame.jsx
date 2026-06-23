@@ -186,6 +186,7 @@ function HexEngine({
   const [sceneId, setSceneId] = useState(startScene);
   const [scenes, setScenes] = useState(initialScenes);
   const [playerPos, setPlayerPos] = useState({ ...initialScenes[startScene].spawn });
+  const [playerFacing, setPlayerFacing] = useState("south");
   const [overlay, setOverlay] = useState(null);
   const [sceneLoading, setSceneLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -227,6 +228,16 @@ function HexEngine({
 
   // ---------------- Movement ----------------
 
+  // Map hex direction names to sprite filenames (6 dirs -> 8 sprites)
+  const DIR_TO_SPRITE = {
+    E:  "east",
+    W:  "west",
+    NE: "north-east",
+    NW: "north-west",
+    SE: "south-east",
+    SW: "south-west",
+  };
+
   const tryMove = useCallback(
     (dirName) => {
       const dir = HEX_DIRS.find((d) => d.name === dirName);
@@ -239,6 +250,7 @@ function HexEngine({
           (e) => e.blocksMovement && entityOccupiesTile(e, nq, nr)
         );
         if (blocked) return prev;
+        setPlayerFacing(DIR_TO_SPRITE[dirName] || "south");
         return { q: nq, r: nr };
       });
     },
@@ -415,14 +427,19 @@ function HexEngine({
             {/* Player */}
             {(() => {
               const { sx, sy } = hexToScreen(playerPos.q, playerPos.r, originX, originY, stepX, stepY);
+              const spriteW = 116;
+              const spriteH = 116;
+              const spriteUrl = `${import.meta.env.BASE_URL}characters/player/skinny_half_man_half_rat/${playerFacing}.png`;
               return (
                 <g>
                   <ellipse cx={sx} cy={sy + 6} rx="10" ry="4" fill="#000" opacity="0.45" />
-                  <polygon
-                    points={`${sx},${sy - 18} ${sx - 8},${sy + 2} ${sx + 8},${sy + 2}`}
-                    fill={T.colors.player || T.colors.accent2 || T.colors.accent}
-                    stroke={T.colors.bg}
-                    strokeWidth="1.5"
+                  <image
+                    href={spriteUrl}
+                    x={sx - spriteW / 2}
+                    y={sy - spriteH}
+                    width={spriteW}
+                    height={spriteH}
+                    style={{ imageRendering: "pixelated" }}
                   />
                 </g>
               );
