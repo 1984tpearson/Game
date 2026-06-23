@@ -359,7 +359,7 @@ function HexEngine({
       )}
 
       <div style={baseStyles.gameArea}>
-        <div style={{ position: "relative", width: 640, height: 440 }}>
+        <div style={{ position: "relative", width: 640, height: 440, transform: "scale(2)", transformOrigin: "top left", marginBottom: 440 }}>
           {/* Tile layer: plain HTML <img> tags, absolutely positioned, */}
           {/* drawn back-to-front so each tile's "skirt" gets covered by */}
           {/* the tile in front of it. SVG <image> with data URIs doesn't */}
@@ -429,6 +429,7 @@ function HexEngine({
               const { sx, sy } = hexToScreen(playerPos.q, playerPos.r, originX, originY, stepX, stepY);
               const spriteW = 116;
               const spriteH = 116;
+              const spriteFeetOffset = 31; // empty px below feet in the sprite
               const spriteUrl = `${import.meta.env.BASE_URL}characters/player/skinny_half_man_half_rat/${playerFacing}.png`;
               return (
                 <g>
@@ -436,7 +437,7 @@ function HexEngine({
                   <image
                     href={spriteUrl}
                     x={sx - spriteW / 2}
-                    y={sy - spriteH}
+                    y={sy - spriteH + spriteFeetOffset}
                     width={spriteW}
                     height={spriteH}
                     style={{ imageRendering: "pixelated" }}
