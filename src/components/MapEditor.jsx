@@ -243,9 +243,17 @@ export default function MapEditor() {
     }
   }
 
+  const panStart = useRef(null);
+
   function handlePointerDown(e) {
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    if (tool === 'pan') {
+      panStart.current = { x: e.clientX, y: e.clientY,
+        scrollLeft: viewportRef.current.scrollLeft,
+        scrollTop: viewportRef.current.scrollTop };
+      return;
+    }
     isPainting.current = true;
     paintedThisStroke.current = new Set();
     const { q, r } = cellFromEvent(e);
@@ -253,6 +261,13 @@ export default function MapEditor() {
   }
 
   function handlePointerMove(e) {
+    if (tool === 'pan') {
+      if (!panStart.current) return;
+      const vp = viewportRef.current;
+      vp.scrollLeft = panStart.current.scrollLeft - (e.clientX - panStart.current.x);
+      vp.scrollTop  = panStart.current.scrollTop  - (e.clientY - panStart.current.y);
+      return;
+    }
     if (!isPainting.current) return;
     e.preventDefault();
     const { q, r } = cellFromEvent(e);
@@ -260,6 +275,7 @@ export default function MapEditor() {
   }
 
   function handlePointerUp(e) {
+    panStart.current = null;
     isPainting.current = false;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
   }
@@ -446,7 +462,7 @@ ${entitiesStr}
                   ...(zoom === z ? styles.toolBtnActive : {}) }}>{z}×</button>
             ))}
           </div>
-          <div ref={viewportRef} style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}`, overflow: 'auto', touchAction: 'pan-x pan-y' }}>
+          <div ref={viewportRef} style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}`, overflow: 'auto', touchAction: tool === 'pan' ? 'pan-x pan-y' : 'none' }}>
             {/* Tile art layer: plain HTML <img> tags (not SVG <image>),
                 since SVG <image> with data URIs doesn't render reliably
                 in some browser contexts — matches the approach used in
@@ -517,7 +533,7 @@ ${entitiesStr}
               ref={canvasRef}
               width={MAP_W * zoom}
               height={MAP_H * zoom}
-              style={{ position: "absolute", top: 0, left: 0, background: "transparent", cursor: "crosshair", touchAction: "none" }}
+              style={{ position: "absolute", top: 0, left: 0, background: "transparent", cursor: tool === 'pan' ? 'grab' : 'crosshair', touchAction: "none" }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
@@ -592,6 +608,9 @@ ${entitiesStr}
             </button>
             <button style={{ ...styles.toolBtn, ...(tool === "erase" ? styles.toolBtnActive : {}) }} onClick={() => setTool("erase")}>
               Erase
+            </button>
+            <button style={{ ...styles.toolBtn, ...(tool === "pan" ? styles.toolBtnActive : {}), gridColumn: 'span 2' }} onClick={() => setTool("pan")}>
+              ✋ Pan (scroll map)
             </button>
           </div>
 
