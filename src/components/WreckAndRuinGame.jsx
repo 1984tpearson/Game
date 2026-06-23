@@ -167,6 +167,80 @@ function entityOccupiesTile(entity, q, r) {
   return entityTiles(entity).some((t) => t.q === q && t.r === r);
 }
 
+// ---------------- A* pathfinder ----------------
+// Returns array of {q,r} steps from start to goal (excluding start),
+// or null if no path exists.
+function hexAstarClean(startQ, startR, goalQ, goalR, floor, blockedTiles) {
+  const key = (q, r) => `${q},${r}`;
+  const heuristic = (q, r) => Math.max(Math.abs(q - goalQ), Math.abs(r - goalR), Math.abs((q + r) - (goalQ + goalR)));
+
+  const open = new Map();
+  const gScore = new Map();
+  const cameFrom = new Map();
+
+  const startKey = key(startQ, startR);
+  gScore.set(startKey, 0);
+  open.set(startKey, { q: startQ, r: startR, f: heuristic(startQ, startR) });
+
+  while (open.size > 0) {
+    let curKey = null, curF = Infinity;
+    for (const [k, v] of open) {
+      if (v.f < curF) { curF = v.f; curKey = k; }
+    }
+    const cur = open.get(curKey);
+    open.delete(curKey);
+
+    if (cur.q === goalQ && cur.r === goalR) {
+      const path = [];
+      let k = curKey;
+      while (k !== startKey) {
+        const [q, r] = k.split(',').map(Number);
+        path.unshift({ q, r });
+        k = cameFrom.get(k);
+      }
+      return path;
+    }
+
+    for (const dir of HEX_DIRS) {
+      const nq = cur.q + dir.dq;
+      const nr = cur.r + dir.dr;
+      const nk = key(nq, nr);
+      if (!floor.has(nk)) continue;
+      if (blockedTiles.has(nk)) continue;
+      const tentG = (gScore.get(curKey) || 0) + 1;
+      if (tentG < (gScore.get(nk) ?? Infinity)) {
+        cameFrom.set(nk, curKey);
+        gScore.set(nk, tentG);
+        open.set(nk, { q: nq, r: nr, f: tentG + heuristic(nq, nr) });
+      }
+    }
+  }
+  return null;
+}
+
+// Derive direction name from one hex step
+function dirBetween(fromQ, fromR, toQ, toR) {
+  const dq = toQ - fromQ;
+  const dr = toR - fromR;
+  const dir = HEX_DIRS.find(d => d.dq === dq && d.dr === dr);
+  return dir ? dir.name : null;
+}
+
+// Convert screen pixel (relative to canvas top-left) back to nearest hex
+function screenToHex(px, py, originX, originY, stepX, stepY) {
+  const x = px - originX;
+  const y = py - originY;
+  const r = y / stepY;
+  const q = x / stepX - r / 2;
+  // Round to nearest hex using cube coordinate rounding
+  const s = -q - r;
+  let rq = Math.round(q), rr = Math.round(r), rs = Math.round(s);
+  const dq = Math.abs(rq - q), dr = Math.abs(rr - r), ds = Math.abs(rs - s);
+  if (dq > dr && dq > ds) rq = -rr - rs;
+  else if (dr > ds) rr = -rq - rs;
+  return { q: rq, r: rr };
+}
+
 function HexEngine({
   theme,
   scenes: initialScenes,
