@@ -282,16 +282,20 @@ export function ellipseCells(cx, cy, radiusX, yRatio = 1) {
 // Returns a fully-opaque 6-digit hex result — the blended colour is
 // baked in so subsequent strokes can compound naturally.
 export function blendColor(existingHex, newHex, opacity) {
-  if (opacity >= 100) return newHex.slice(0, 7); // strip any alpha suffix, full replace
+  if (opacity >= 100) return newHex.slice(0, 7);
+  // Painting onto a transparent pixel: store the colour at reduced opacity
+  // as an 8-digit hex rather than blending against an implied black background.
+  if (!existingHex) {
+    const a = Math.round((opacity / 100) * 255).toString(16).padStart(2, '0');
+    return newHex.slice(0, 7) + a;
+  }
   const a = opacity / 100;
-  // Parse new colour (strip alpha byte if present)
   const nr = parseInt(newHex.slice(1, 3), 16);
   const ng = parseInt(newHex.slice(3, 5), 16);
   const nb = parseInt(newHex.slice(5, 7), 16);
-  // Parse existing colour, default to transparent (black) if null
-  const er = existingHex ? parseInt(existingHex.slice(1, 3), 16) : 0;
-  const eg = existingHex ? parseInt(existingHex.slice(3, 5), 16) : 0;
-  const eb = existingHex ? parseInt(existingHex.slice(5, 7), 16) : 0;
+  const er = parseInt(existingHex.slice(1, 3), 16);
+  const eg = parseInt(existingHex.slice(3, 5), 16);
+  const eb = parseInt(existingHex.slice(5, 7), 16);
   const toHex = (v) => Math.round(v).toString(16).padStart(2, '0');
   return `#${toHex(nr * a + er * (1 - a))}${toHex(ng * a + eg * (1 - a))}${toHex(nb * a + eb * (1 - a))}`;
 }
