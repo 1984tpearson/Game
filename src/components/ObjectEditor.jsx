@@ -11,21 +11,10 @@ import {
   Overlay, ExportPreview, LibraryItem, PixelSidebar, C, S,
 } from './TileEditor.jsx';
 
-// Object mode uses a true-circle ellipse (no foreshortening) since
-// objects aren't drawn on an iso-projected surface — yRatio = 1.
 const ELLIPSE_Y_RATIO = 1;
-
-// Default canvas size for new objects. User can change this before drawing.
 const DEFAULT_W = 39;
 const DEFAULT_H = 60;
-
-// Zoom chosen so a 39×60 object fits reasonably alongside the sidebar.
 const ZOOM = 10;
-
-// =================================================================
-// Footprint picker — a small hex-grid SVG the user clicks to mark
-// which hexes relative to the anchor (0,0) this object occupies.
-// =================================================================
 
 const STEP_X = 20;
 const STEP_Y = 14;
@@ -50,18 +39,15 @@ const FOOTPRINT_HEXES = [
 
 function FootprintPicker({ footprint, onChange }) {
   const fpSet = new Set(footprint.map(([q, r]) => hexKey(q, r)));
-
   function toggle(q, r) {
     const key = hexKey(q, r);
-    if (q === 0 && r === 0) return; // anchor always included
+    if (q === 0 && r === 0) return;
     const next = fpSet.has(key)
       ? footprint.filter(([fq, fr]) => !(fq === q && fr === r))
       : [...footprint, [q, r]];
     onChange(next);
   }
-
   const W = 120, H = 100, cx0 = 60, cy0 = 50;
-
   return (
     <div>
       <div style={{ fontSize: 9, color: C.textDim, marginBottom: 4 }}>
@@ -74,15 +60,11 @@ function FootprintPicker({ footprint, onChange }) {
           const isAnchor = q === 0 && r === 0;
           const active = fpSet.has(hexKey(q, r));
           return (
-            <polygon
-              key={hexKey(q, r)}
-              points={hexOutlinePoints(sx, sy, HEX_R)}
+            <polygon key={hexKey(q, r)} points={hexOutlinePoints(sx, sy, HEX_R)}
               fill={isAnchor ? C.brass : active ? C.rust : C.bg}
-              stroke={C.border}
-              strokeWidth="1"
+              stroke={C.border} strokeWidth="1"
               style={{ cursor: isAnchor ? 'default' : 'pointer' }}
-              onClick={() => toggle(q, r)}
-            />
+              onClick={() => toggle(q, r)} />
           );
         })}
       </svg>
@@ -90,15 +72,9 @@ function FootprintPicker({ footprint, onChange }) {
   );
 }
 
-// =================================================================
-// ObjectEditor component
-// =================================================================
-
 export default function ObjectEditor() {
   const [objW, setObjW] = useState(DEFAULT_W);
   const [objH, setObjH] = useState(DEFAULT_H);
-  // Committed dimensions — what the current grid is sized to.
-  // Changing dimensions without committing warns before resizing.
   const [gridW, setGridW] = useState(DEFAULT_W);
   const [gridH, setGridH] = useState(DEFAULT_H);
   const [grid, setGrid] = useState(() => makeBlankGrid(DEFAULT_W, DEFAULT_H));
@@ -118,7 +94,6 @@ export default function ObjectEditor() {
   const [exportImg, setExportImg] = useState(null);
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
 
-  // Canvas transform UI state
   const [expandTop, setExpandTop] = useState(0);
   const [expandRight, setExpandRight] = useState(0);
   const [expandBottom, setExpandBottom] = useState(0);
@@ -127,7 +102,6 @@ export default function ObjectEditor() {
   const [scaleTargetH, setScaleTargetH] = useState(DEFAULT_H);
 
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-
   const [objName, setObjName] = useState('');
   const [footprint, setFootprint] = useState([[0, 0]]);
   const [defaultKind, setDefaultKind] = useState('object');
@@ -142,6 +116,15 @@ export default function ObjectEditor() {
   const [objLibraryLoading, setObjLibraryLoading] = useState(false);
   const [objLibraryError, setObjLibraryError] = useState(null);
   const [loadingObj, setLoadingObj] = useState(false);
+
+  // PixelLab generation panel
+  const [genPanelOpen, setGenPanelOpen] = useState(false);
+  const [genDescription, setGenDescription] = useState('');
+  const [genWidth, setGenWidth] = useState(39);
+  const [genHeight, setGenHeight] = useState(60);
+  const [genStatus, setGenStatus] = useState('idle'); // idle | generating | done | error
+  const [genError, setGenError] = useState(null);
+  const [genPreviewUrl, setGenPreviewUrl] = useState(null);
 
   const isDrawing = useRef(false);
   const shadowedThisStroke = useRef(new Set());
@@ -414,13 +397,67 @@ export default function ObjectEditor() {
     setExportImg(null); setSaveStatus(null);
   }
 
+  // Generate an object image from PixelLab and load it into the canvas.
+  // Uses create-image-pixflux (synchronous, returns base64 directly).
+  // Fixed: transparent background, low top-down view.
+  async function generateFromPixellab() {
+    if (!genDescription.trim()) return;
+    setGenStatus('generating');
+    setGenError(null);
+    setGenPreviewUrl(null);
+    try {
+      const PROXY = 'https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/pixellab-proxy';
+      const res = await fetch(`${PROXY}/create-image-pixflux`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: genDescription.trim(),
+          image_size: { width: genWidth, height: genHeight },
+          no_background: true,
+          view: 'low top-down',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || data?.error || `API error ${res.status}`);
+      const base64 = data?.image?.base64;
+      if (!base64) throw new Error('No image in response');
+      setGenPreviewUrl(base64);
+      setGenStatus('done');
+    } catch (e) {
+      setGenStatus('error');
+      setGenError(e.message || 'Generation failed');
+    }
+  }
+
+  // Take the PixelLab preview, decode it into the pixel canvas,
+  // then open the save overlay so the user can name and save it.
+  async function useGeneratedImage() {
+    if (!genPreviewUrl) return;
+    try {
+      const decoded = await decodeImageToGrid(genPreviewUrl, genWidth, genHeight);
+      pushHistory(grid);
+      setGrid(decoded);
+      setGridW(genWidth); setGridH(genHeight);
+      setObjW(genWidth); setObjH(genHeight);
+      setScaleTargetW(genWidth); setScaleTargetH(genHeight);
+      setLoadedObjId(null);
+      setObjName(genDescription.trim().slice(0, 60));
+      setFootprint([[0, 0]]);
+      setDefaultKind('object'); setDefaultTrigger(''); setDefaultBlocksMovement(false);
+      setExportImg(genPreviewUrl);
+      setGenPanelOpen(false);
+      setExportPanelOpen(true);
+      setSaveStatus(null);
+    } catch (e) {
+      setGenError('Failed to load generated image: ' + e.message);
+    }
+  }
+
   // Import a PNG from disk (e.g. exported from PixelLab, Aseprite, etc.)
-  // Reads the image's natural pixel dimensions and sizes the canvas to
-  // match automatically, so no manual resize step is needed.
   async function handleImportFile(e) {
     const file = e.target.files?.[0];
     if (!fileInputRef.current) return;
-    fileInputRef.current.value = ''; // reset so the same file can be re-selected
+    fileInputRef.current.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       setImportError('Please select a PNG image file.');
@@ -430,9 +467,6 @@ export default function ObjectEditor() {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       const dataUrl = ev.target.result;
-      // Read the image's actual pixel dimensions first, before decoding
-      // the grid — object mode respects the source art's real size rather
-      // than forcing it into a fixed canvas like tile mode does.
       const img = new Image();
       img.onload = async () => {
         const w = Math.min(img.naturalWidth, 200);
@@ -447,11 +481,8 @@ export default function ObjectEditor() {
           setGridW(w); setGridH(h);
           setObjW(w); setObjH(h);
           setScaleTargetW(w); setScaleTargetH(h);
-          // Clear any loaded-object tracking — this is new art, not a
-          // library object being edited, even if we later save it there.
           setLoadedObjId(null);
           setExportImg(null); setSaveStatus(null);
-          // Pre-fill the name from the filename if none set yet
           if (!objName.trim()) {
             const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ');
             setObjName(baseName);
@@ -487,11 +518,8 @@ export default function ObjectEditor() {
       </header>
 
       <div style={S.body}>
-        {/* ---- Canvas ---- */}
         <div style={S.canvasWrap}>
-          <div
-            ref={canvasRef}
-            style={canvasStyle}
+          <div ref={canvasRef} style={canvasStyle}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -524,7 +552,6 @@ export default function ObjectEditor() {
           <div style={S.canvasLabel}>{gridW}×{gridH} · transparent background shown in game</div>
         </div>
 
-        {/* ---- Sidebar ---- */}
         <PixelSidebar
           tool={tool} setTool={setTool}
           brushSize={brushSize} setBrushSize={setBrushSize}
@@ -548,23 +575,26 @@ export default function ObjectEditor() {
           hideMaskToggle
           extraTopControls={
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={S.sectionLabel}>generate with pixellab</div>
+              <button style={S.exportBtn} onClick={() => {
+                setGenPanelOpen(true);
+                setGenStatus('idle');
+                setGenError(null);
+                setGenPreviewUrl(null);
+              }}>
+                Generate with PixelLab…
+              </button>
+
               <div style={S.sectionLabel}>import PNG</div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <button style={S.exportBtn} onClick={() => fileInputRef.current?.click()}>
                   Import PNG from PixelLab…
                 </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/png,image/*"
-                  style={{ display: 'none' }}
-                  onChange={handleImportFile}
-                />
+                <input ref={fileInputRef} type="file" accept="image/png,image/*"
+                  style={{ display: 'none' }} onChange={handleImportFile} />
               </div>
               {importError && <div style={{ ...S.hint, color: C.rust }}>{importError}</div>}
-              <div style={{ ...S.hint }}>
-                saves at original pixel dimensions — canvas auto-resizes to match
-              </div>
+              <div style={S.hint}>saves at original pixel dimensions — canvas auto-resizes to match</div>
 
               <div style={S.sectionLabel}>canvas size</div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -638,8 +668,7 @@ export default function ObjectEditor() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 120 }}>
               <div style={{ fontSize: 9, color: C.textDim, marginBottom: 2 }}>kind</div>
-              <select value={defaultKind} onChange={e => setDefaultKind(e.target.value)}
-                style={S.textInput}>
+              <select value={defaultKind} onChange={e => setDefaultKind(e.target.value)} style={S.textInput}>
                 <option value="object">object</option>
                 <option value="npc">npc</option>
                 <option value="info">info / sign</option>
@@ -648,8 +677,7 @@ export default function ObjectEditor() {
             </div>
             <div style={{ flex: 1, minWidth: 120 }}>
               <div style={{ fontSize: 9, color: C.textDim, marginBottom: 2 }}>trigger on</div>
-              <select value={defaultTrigger} onChange={e => setDefaultTrigger(e.target.value)}
-                style={S.textInput}>
+              <select value={defaultTrigger} onChange={e => setDefaultTrigger(e.target.value)} style={S.textInput}>
                 <option value="">none (decorative)</option>
                 <option value="enter">walk onto</option>
                 <option value="use">use (future)</option>
@@ -686,6 +714,72 @@ export default function ObjectEditor() {
           )}
           {saveStatus==='saved' && <div style={{fontSize:10,color:C.brass}}>Saved — available in the Map Editor.</div>}
           {saveStatus==='error' && <div style={{fontSize:10,color:C.rust}}>{saveError}</div>}
+        </Overlay>
+      )}
+
+      {/* ---- Generate with PixelLab overlay ---- */}
+      {genPanelOpen && (
+        <Overlay onClose={() => setGenPanelOpen(false)} title="GENERATE WITH PIXELLAB">
+          <div style={S.sectionLabel}>description</div>
+          <textarea
+            style={{ ...S.textInput, height: 72, resize: 'vertical' }}
+            value={genDescription}
+            onChange={e => setGenDescription(e.target.value)}
+            placeholder="e.g. rusted vending machine, low top-down view, transparent background"
+            disabled={genStatus === 'generating'}
+          />
+
+          <div style={S.sectionLabel}>size (px)</div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="number" min="16" max="400" value={genWidth}
+              onChange={e => setGenWidth(Math.max(16, Math.min(400, Number(e.target.value))))}
+              style={{ ...S.textInput, width: 70 }}
+              disabled={genStatus === 'generating'} />
+            <span style={{ color: C.textDim, fontSize: 10 }}>×</span>
+            <input type="number" min="16" max="400" value={genHeight}
+              onChange={e => setGenHeight(Math.max(16, Math.min(400, Number(e.target.value))))}
+              style={{ ...S.textInput, width: 70 }}
+              disabled={genStatus === 'generating'} />
+          </div>
+          <div style={S.hint}>transparent background · low top-down · max 400×400</div>
+
+          <button
+            style={{ ...S.exportBtn, marginTop: 8, opacity: genStatus === 'generating' || !genDescription.trim() ? 0.5 : 1 }}
+            onClick={generateFromPixellab}
+            disabled={genStatus === 'generating' || !genDescription.trim()}
+          >
+            {genStatus === 'generating' ? 'Generating…' : 'Generate'}
+          </button>
+
+          {genStatus === 'error' && (
+            <div style={{ ...S.hint, color: C.rust, marginTop: 4 }}>{genError}</div>
+          )}
+
+          {genPreviewUrl && genStatus === 'done' && (
+            <>
+              <div style={S.sectionLabel}>preview</div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginTop: 4 }}>
+                <img src={genPreviewUrl} alt="generated"
+                  style={{
+                    width: Math.min(genWidth * 3, 180),
+                    height: Math.min(genHeight * 3, 180 * genHeight / genWidth),
+                    imageRendering: 'pixelated',
+                    background: 'repeating-conic-gradient(#333 0% 25%, #222 0% 50%) 0 0 / 8px 8px',
+                    flexShrink: 0,
+                  }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ fontSize: 10, color: C.textDim }}>{genWidth}×{genHeight}px</div>
+                  <button style={S.exportBtn} onClick={useGeneratedImage}>
+                    Use this → save to library
+                  </button>
+                  <button style={S.actionBtn} onClick={() => { setGenStatus('idle'); setGenPreviewUrl(null); }}>
+                    Regenerate
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </Overlay>
       )}
 
