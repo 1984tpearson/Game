@@ -167,7 +167,7 @@ export default function CharacterGenerator() {
       const table = tab === 'player' ? 'player_characters' : 'npc_templates';
       const record = tab === 'player'
         ? { name: plChar.name, description: plChar.prompt, sprites: convertedSprites }
-        : { name: plChar.name, role: 'NPC', blurb: '', description: plChar.prompt,
+        : { name: plChar.name, role: 'NPC', blurb: plChar.prompt,
             sprites: convertedSprites, ai_generated: false };
       await supabase.from(table).insert(record);
       loadSaved();
