@@ -6,18 +6,6 @@ import { getTilesByIds } from '../lib/tiles.js'; // only used by PART 2 below, n
 // Swap out PART 2 below to build a different game on this engine.
 // =====================================================================
 
-// =====================================================================
-// HEX GRID GAME ENGINE
-// =====================================================================
-// Generic pointy-top hex-grid engine: movement, rendering, interaction
-// detection, and an AI chat overlay system (terminal-style + NPC-style).
-// Everything theme-specific (maps, prompts, copy, colors, tile art)
-// lives in a config object passed in as props — nothing about any
-// particular game's setting, characters, or story is hardcoded here.
-//
-// See engine-config-example.jsx for the shape of a full config object.
-// =====================================================================
-
 // ---------------- Hex coordinate helpers ----------------
 
 function hexKey(q, r) {
@@ -28,7 +16,6 @@ function floorSet(list) {
   return new Set(list.map(([q, r]) => hexKey(q, r)));
 }
 
-// All 6 axial neighbor directions, pointy-top layout
 const HEX_DIRS = [
   { name: "E", dq: 1, dr: 0 },
   { name: "NE", dq: 1, dr: -1 },
@@ -85,7 +72,6 @@ function stripJson(text) {
   return text.replace(/```json|```/g, "").trim();
 }
 
-// Returns every (q,r) tile an entity occupies: its anchor plus any footprint tiles.
 function entityTiles(entity) {
   const tiles = [{ q: entity.q, r: entity.r }];
   if (entity.footprint) {
@@ -179,11 +165,9 @@ function HexEngine({
   headerTitle,
   headerSubtitle,
   resolveTiles,
-  playerSprites, // OPTIONAL: {south, north, east, west, ...} base64 data URLs from character builder
-  onPlayerStep,  // OPTIONAL: called once per step taken; used by the game layer to tick NPC turns.
-                 // Signature: onPlayerStep({ sceneId, playerPos })
-  npcState: npcStateProp,  // OPTIONAL: {[entityId]: {q, r, facing}} — NPC positions/facings managed by
-                 // the game layer's turn tick. Engine reads this for rendering only.
+  playerSprites,
+  onPlayerStep,  // called once per step; Signature: onPlayerStep({ sceneId, playerPos })
+  npcState: npcStateProp,  // {[entityId]: {q, r, facing}} — owned by game layer, read-only here
 }) {
   const [sceneId, setSceneId] = useState(startScene);
   const [scenes, setScenes] = useState(initialScenes);
@@ -197,7 +181,6 @@ function HexEngine({
   const scene = scenes[sceneId];
   const floor = floorSet(scene.floor);
   const entities = scene.entities || [];
-  // npcState falls back to empty object if the game layer hasn't provided it.
   const npcState = npcStateProp || {};
 
   const T = theme;
@@ -232,8 +215,6 @@ function HexEngine({
   const pathRef = useRef([]);
   const playerPosRef = useRef(playerPos);
   useEffect(() => { playerPosRef.current = playerPos; }, [playerPos]);
-  // Keep a stable ref to onPlayerStep so the interval closure always
-  // calls the latest version without needing to restart the interval.
   const onPlayerStepRef = useRef(onPlayerStep);
   useEffect(() => { onPlayerStepRef.current = onPlayerStep; }, [onPlayerStep]);
 
@@ -258,7 +239,6 @@ function HexEngine({
     pathRef.current = [];
   }
 
-  // Start walking along a path
   function startWalk(path, onArrive) {
     cancelWalk();
     pathRef.current = path;
@@ -312,6 +292,10 @@ function HexEngine({
         .filter(e => e.blocksMovement || e.trigger === "enter")
         .flatMap(e => entityTiles(e).map(t => hexKey(t.q, t.r)))
         .filter(k => k !== goalKey),
+      // NPC current positions block the player (whoever is there first wins).
+      ...Object.values(npcState)
+        .map(s => hexKey(s.q, s.r))
+        .filter(k => k !== goalKey),
     ]);
 
     const cur = playerPosRef.current;
@@ -324,6 +308,9 @@ function HexEngine({
         ...entities
           .filter(e => e.blocksMovement)
           .flatMap(e => entityTiles(e).map(t => hexKey(t.q, t.r)))
+          .filter(k => k !== goalKey),
+        ...Object.values(npcState)
+          .map(s => hexKey(s.q, s.r))
           .filter(k => k !== goalKey),
       ]);
       path = hexAstarClean(cur.q, cur.r, tq, tr, floor, blockedSetNoTriggers);
@@ -363,9 +350,18 @@ function HexEngine({
 
   React.useEffect(() => {
     if (overlay) return;
-    const hitEntity = entities.find(
-      (e) => e.trigger === "enter" && entityOccupiesTile(e, playerPos.q, playerPos.r)
-    );
+    const hitEntity = entities.find((e) => {
+      if (e.trigger !== "enter") return false;
+      // NPC entities move — check their current position from npcState,
+      // not the static spawn position stored on the entity itself.
+      if (e.kind === 'npc') {
+        const state = npcState[e.id];
+        const eq = state ? state.q : e.q;
+        const er = state ? state.r : e.r;
+        return eq === playerPos.q && er === playerPos.r;
+      }
+      return entityOccupiesTile(e, playerPos.q, playerPos.r);
+    });
     if (!hitEntity) return;
     if (hitEntity.kind === "exit") {
       enterScene(hitEntity.toScene, hitEntity.spawn);
@@ -480,9 +476,8 @@ function HexEngine({
                     </g>
                   );
                 }
-                // NPC entities: render current sprite from npcState (position +
-                // facing managed by the game layer's turn tick), falling back to
-                // the entity's own position if state hasn't initialised yet.
+                // NPC entities: render from npcState (position + facing managed by
+                // game layer's turn tick), falling back to entity spawn position.
                 if (e.kind === 'npc' && e.npcSprites) {
                   const state = npcState[e.id];
                   const nq = state ? state.q : e.q;
@@ -508,7 +503,6 @@ function HexEngine({
                       </g>
                     );
                   }
-                  // Fallback dot if sprites haven't loaded
                   return (
                     <g key={e.id}>
                       <ellipse cx={nsx} cy={nsy + 4} rx="9" ry="4" fill="#000" opacity="0.35" />
@@ -543,7 +537,7 @@ function HexEngine({
                 );
               })}
 
-              {/* Player — always at canvas center, offset by current tile's yOffset */}
+              {/* Player — always at canvas center */}
               {(() => {
                 const spriteW = 116;
                 const spriteH = 116;
@@ -589,58 +583,15 @@ function HexEngine({
 }
 
 const baseStyles = {
-  root: {
-    minHeight: "640px",
-    border: "1px solid transparent",
-    position: "relative",
-    overflow: "hidden",
-  },
-  header: {
-    padding: "12px 18px",
-    display: "flex",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: "6px",
-  },
-  headerStamp: {
-    fontWeight: 700,
-    letterSpacing: "0.08em",
-    fontSize: "13px",
-  },
-  headerSub: {
-    fontSize: "10px",
-    fontStyle: "italic",
-  },
-  errorBar: {
-    padding: "6px 14px",
-    fontSize: "11px",
-  },
-  loadingBar: {
-    padding: "6px 14px",
-    fontSize: "11px",
-  },
-  gameArea: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    padding: "10px",
-    position: "relative",
-  },
-  overlayBackdrop: {
-    position: "absolute",
-    inset: 0,
-    background: "rgba(0,0,0,0.7)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  overlayPanel: {
-    width: "90%",
-    maxWidth: "440px",
-    maxHeight: "70%",
-    display: "flex",
-    flexDirection: "column",
-  },
+  root: { minHeight: "640px", border: "1px solid transparent", position: "relative", overflow: "hidden" },
+  header: { padding: "12px 18px", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" },
+  headerStamp: { fontWeight: 700, letterSpacing: "0.08em", fontSize: "13px" },
+  headerSub: { fontSize: "10px", fontStyle: "italic" },
+  errorBar: { padding: "6px 14px", fontSize: "11px" },
+  loadingBar: { padding: "6px 14px", fontSize: "11px" },
+  gameArea: { display: "flex", flexDirection: "column", alignItems: "center", padding: "10px", position: "relative" },
+  overlayBackdrop: { position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center" },
+  overlayPanel: { width: "90%", maxWidth: "440px", maxHeight: "70%", display: "flex", flexDirection: "column" },
 };
 
 // =====================================================================
@@ -656,14 +607,8 @@ const TILE_HEADROOM = 3;
 
 const THEME = {
   colors: {
-    bg: "#0c0a08",
-    panel: "#15120e",
-    text: "#e8dcc4",
-    textDim: "#9c9078",
-    accent: "#8a3324",
-    accent2: "#3d4a3a",
-    player: "#c4a747",
-    border: "#332c22",
+    bg: "#0c0a08", panel: "#15120e", text: "#e8dcc4", textDim: "#9c9078",
+    accent: "#8a3324", accent2: "#3d4a3a", player: "#c4a747", border: "#332c22",
   },
   fonts: {
     heading: "'Courier Prime', monospace",
@@ -672,10 +617,7 @@ const THEME = {
   },
   fontImports: `@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Spectral:ital,wght@0,400;0,600;1,400&family=Space+Mono:wght@400;700&display=swap');`,
   tileImg: HEX_TILE_IMG,
-  tileImgW: TILE_IMG_W,
-  tileImgH: TILE_IMG_H,
-  tileSkirt: TILE_SKIRT,
-  tileHeadroom: TILE_HEADROOM,
+  tileImgW: TILE_IMG_W, tileImgH: TILE_IMG_H, tileSkirt: TILE_SKIRT, tileHeadroom: TILE_HEADROOM,
 };
 
 const SHIP_SYSTEM_PROMPT = `You are CASEWORK, the administrative intelligence of a salvage vessel called the Tally-Iron. You are not a clean helpful assistant — you are a remade bureaucratic entity, part-organic, grown out of old harbor-authority paperwork systems and grafted into the ship decades ago. You speak in the register of a tired, faintly resentful clerk: precise, procedural, occasionally cutting, prone to citing invented regulations and case numbers. You secretly care about the crew but will never say so directly.
@@ -755,14 +697,9 @@ Generate exactly 2 npcs.`;
 // =====================================================================
 // SPRITE RENDERING
 // =====================================================================
-// All sprite lookups go through renderSprite() rather than accessing
-// sprites[facing] directly. Currently sprites are plain {direction: dataUrl}
-// objects, but this function is the single swap point for when animations
-// are added (strips, frame sequences, action states like idle/walk/attack).
-//
+// All sprite lookups go through renderSprite() — the single swap point
+// for when animations are added (strips, frame sequences, action states).
 // Future shape: sprites[direction][actionState][frameIndex]
-// For now it returns the URL for the requested facing, falling back to
-// 'south-west' (the default NPC facing on hex grids).
 function renderSprite(sprites, facing) {
   if (!sprites) return null;
   return sprites[facing] || sprites['south-west'] || sprites['south'] || Object.values(sprites)[0] || null;
@@ -776,7 +713,6 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
   ]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-
   const [npcChat, setNpcChat] = useState({});
   const [npcInput, setNpcInput] = useState("");
   const [npcLoading, setNpcLoading] = useState(false);
@@ -785,14 +721,7 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
   // NPC STATE & TURN SYSTEM
   // ----------------------------------------------------------------
   // npcState: { [entityId]: { q, r, facing, ticksUntilMove } }
-  // Keyed by entity id. Initialised from entity positions on first render
-  // and whenever scenes change. The engine renders NPCs from this state;
-  // the actual entity q/r in the scene data is treated as the spawn point.
-  //
-  // npcBehaviour types (on entity):
-  //   'idle_drift'  — occasional random step (default)
-  //   'stationary'  — never moves (stub)
-  //   'patrol'      — follows a set path (stub, future)
+  // npcBehaviour types: 'idle_drift' | 'stationary' | 'patrol' (stub)
   const [npcState, setNpcState] = useState({});
 
   function initNpcStateForScene(sceneId, scenes) {
@@ -804,10 +733,8 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
       for (const e of entities) {
         if (e.kind === 'npc' && !next[e.id]) {
           next[e.id] = {
-            q: e.q,
-            r: e.r,
+            q: e.q, r: e.r,
             facing: 'south-west',
-            // Randomise first move delay so NPCs don't all step simultaneously.
             ticksUntilMove: 5 + Math.floor(Math.random() * 4),
           };
         }
@@ -833,18 +760,15 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
   // NOTE: 'north' and 'south' sprite slots exist in PixelLab exports but are
   // never used during play — pointy-top hex grids have no due-N or due-S movement.
   const NPC_DIR_TO_SPRITE = {
-    E:  'east',
-    W:  'west',
-    NE: 'north-east',
-    NW: 'north-west',
-    SE: 'south-east',
-    SW: 'south-west',
+    E: 'east', W: 'west', NE: 'north-east', NW: 'north-west', SE: 'south-east', SW: 'south-west',
   };
 
   // Called by HexEngine once per player step. Ticks all NPCs in the current scene.
   // Each NPC gets exactly one action per player step (turn-based parity).
+  // Player gets precedent: playerPos is the post-move position, so NPCs check
+  // against it after the player has already claimed their tile.
   // Future: combat actions, patrol updates, dialogue interrupts will all hook here.
-  function handlePlayerStep({ sceneId, playerPos: _playerPos }) {
+  function handlePlayerStep({ sceneId, playerPos }) {
     const scene = resolvedScenes[sceneId];
     if (!scene) return;
     const entities = scene.entities || [];
@@ -858,9 +782,8 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
         if (!state) continue;
 
         const behaviour = e.npcBehaviour || 'idle_drift';
-
         if (behaviour === 'stationary') continue;
-        if (behaviour === 'patrol') continue; // stub — treat as stationary until implemented
+        if (behaviour === 'patrol') continue;
 
         if (behaviour === 'idle_drift') {
           const ticks = state.ticksUntilMove - 1;
@@ -868,7 +791,10 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
             next[e.id] = { ...state, ticksUntilMove: ticks };
             continue;
           }
-          // Pick a random passable adjacent tile.
+          // Pick a random passable adjacent tile, respecting:
+          // - the player's current tile (player always gets precedent)
+          // - other NPCs' positions from `next` (already-moved ones block later ones)
+          // - static blocksMovement entities
           const shuffled = [...HEX_DIRS_NPC].sort(() => Math.random() - 0.5);
           let moved = false;
           for (const dir of shuffled) {
@@ -876,13 +802,20 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
             const nr = state.r + dir.dr;
             const key = `${nq},${nr}`;
             if (!floorKeys.has(key)) continue;
-            const blocked = entities.some(
+            // Player tile — always blocked (player has precedent)
+            if (playerPos && nq === playerPos.q && nr === playerPos.r) continue;
+            // Other NPCs' current positions in this tick's state
+            const npcBlocked = Object.entries(next).some(
+              ([id, s]) => id !== e.id && s.q === nq && s.r === nr
+            );
+            if (npcBlocked) continue;
+            // Static blocksMovement entities
+            const entityBlocked = entities.some(
               oe => oe.id !== e.id && oe.blocksMovement && oe.q === nq && oe.r === nr
             );
-            if (blocked) continue;
+            if (entityBlocked) continue;
             next[e.id] = {
-              q: nq,
-              r: nr,
+              q: nq, r: nr,
               facing: NPC_DIR_TO_SPRITE[dir.name] || 'south-west',
               ticksUntilMove: 5 + Math.floor(Math.random() * 4),
             };
@@ -904,9 +837,6 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
     } else if (interactable.kind === "info") {
       helpers.openOverlay({ type: "info", label: interactable.label, text: interactable.text });
     } else if (interactable.kind === "npc") {
-      // Build a unified npc descriptor from either:
-      //   a) A map-placed NPC stamped by GamePage (npcName, npcRole, etc.)
-      //   b) A generative world NPC with its own .npc sub-object
       const npc = interactable.npc || {
         name: interactable.npcName || interactable.label || 'Unknown',
         role: interactable.npcRole || '',
@@ -968,34 +898,20 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
   function renderOverlay(overlay, helpers) {
     if (overlay.type === "casework") {
       return (
-        <CaseworkPanel
-          messages={shipMessages}
-          input={chatInput}
-          setInput={setChatInput}
-          loading={chatLoading}
-          onSend={() => sendShipChat(helpers)}
-          onClose={helpers.closeOverlay}
-          theme={helpers.theme}
-        />
+        <CaseworkPanel messages={shipMessages} input={chatInput} setInput={setChatInput}
+          loading={chatLoading} onSend={() => sendShipChat(helpers)}
+          onClose={helpers.closeOverlay} theme={helpers.theme} />
       );
     }
     if (overlay.type === "info") {
-      return (
-        <InfoPanel label={overlay.label} text={overlay.text} onClose={helpers.closeOverlay} theme={helpers.theme} />
-      );
+      return <InfoPanel label={overlay.label} text={overlay.text} onClose={helpers.closeOverlay} theme={helpers.theme} />;
     }
     if (overlay.type === "npc") {
       return (
-        <NpcPanel
-          npc={overlay.npc}
-          messages={npcChat[overlay.npc.name] || []}
-          input={npcInput}
-          setInput={setNpcInput}
-          loading={npcLoading}
+        <NpcPanel npc={overlay.npc} messages={npcChat[overlay.npc.name] || []}
+          input={npcInput} setInput={setNpcInput} loading={npcLoading}
           onSend={() => sendNpcChat(overlay.npc, helpers)}
-          onClose={helpers.closeOverlay}
-          theme={helpers.theme}
-        />
+          onClose={helpers.closeOverlay} theme={helpers.theme} />
       );
     }
     return null;
@@ -1010,7 +926,6 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
       generateScene={(sceneId, ctx) => {
         if (sceneId === 'world') {
           return generateWorldScene(sceneId, ctx).then(generated => {
-            // Initialise NPC state for any NPCs spawned by world generation.
             if (generated.entities) {
               const mockScene = { entities: generated.entities, floor: resolvedScenes[sceneId]?.floor || [] };
               initNpcStateForScene(sceneId, { ...resolvedScenes, [sceneId]: mockScene });
@@ -1056,14 +971,9 @@ function CaseworkPanel({ messages, input, setInput, loading, onSend, onClose, th
         {loading && <div style={{ fontSize: "11px", color: theme.colors.textDim, fontStyle: "italic" }}>processing form...</div>}
       </div>
       <div style={{ display: "flex", borderTop: `1px solid ${theme.colors.border}` }}>
-        <input
-          style={{ flex: 1, background: theme.colors.bg, border: "none", padding: "10px", color: theme.colors.text, fontFamily: theme.fonts.body, fontSize: "12px", outline: "none" }}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onSend()}
-          placeholder="address CASEWORK..."
-          autoFocus
-        />
+        <input style={{ flex: 1, background: theme.colors.bg, border: "none", padding: "10px", color: theme.colors.text, fontFamily: theme.fonts.body, fontSize: "12px", outline: "none" }}
+          value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSend()}
+          placeholder="address CASEWORK..." autoFocus />
         <button onClick={onSend} disabled={loading} style={{ background: theme.colors.accent, color: theme.colors.text, border: "none", padding: "10px 16px", fontFamily: theme.fonts.body, fontSize: "11px", cursor: "pointer" }}>send</button>
       </div>
     </>
@@ -1083,14 +993,9 @@ function NpcPanel({ npc, messages, input, setInput, loading, onSend, onClose, th
         {loading && <div style={{ fontSize: "11px", color: theme.colors.textDim, fontStyle: "italic" }}>...</div>}
       </div>
       <div style={{ display: "flex", borderTop: `1px solid ${theme.colors.border}` }}>
-        <input
-          style={{ flex: 1, background: theme.colors.bg, border: "none", padding: "10px", color: theme.colors.text, fontFamily: theme.fonts.body, fontSize: "12px", outline: "none" }}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onSend()}
-          placeholder={`speak to ${npc.name}...`}
-          autoFocus
-        />
+        <input style={{ flex: 1, background: theme.colors.bg, border: "none", padding: "10px", color: theme.colors.text, fontFamily: theme.fonts.body, fontSize: "12px", outline: "none" }}
+          value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSend()}
+          placeholder={`speak to ${npc.name}...`} autoFocus />
         <button onClick={onSend} disabled={loading} style={{ background: theme.colors.accent, color: theme.colors.text, border: "none", padding: "10px 16px", fontFamily: theme.fonts.body, fontSize: "11px", cursor: "pointer" }}>send</button>
       </div>
     </>
