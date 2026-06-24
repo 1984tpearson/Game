@@ -120,9 +120,9 @@ export default function ObjectEditor() {
   // PixelLab generation panel
   const [genPanelOpen, setGenPanelOpen] = useState(false);
   const [genDescription, setGenDescription] = useState('');
-  const [genWidth, setGenWidth] = useState(39);
-  const [genHeight, setGenHeight] = useState(60);
-  const [genStatus, setGenStatus] = useState('idle'); // idle | generating | done | error
+  const [genWidth, setGenWidth] = useState(40);   // default 40 — divisible by 4
+  const [genHeight, setGenHeight] = useState(60); // 60 is divisible by 4
+  const [genStatus, setGenStatus] = useState('idle');
   const [genError, setGenError] = useState(null);
   const [genPreviewUrl, setGenPreviewUrl] = useState(null);
 
@@ -398,10 +398,16 @@ export default function ObjectEditor() {
   }
 
   // Generate an object image from PixelLab and load it into the canvas.
-  // Uses create-image-pixflux (synchronous, returns base64 directly).
+  // Uses create-image-pixen (synchronous, returns base64 directly).
   // Fixed: transparent background, low top-down view.
+  // pixen requires width and height divisible by 4 — rounded up automatically.
   async function generateFromPixellab() {
     if (!genDescription.trim()) return;
+    // Round up to nearest multiple of 4
+    const w = Math.ceil(genWidth / 4) * 4;
+    const h = Math.ceil(genHeight / 4) * 4;
+    setGenWidth(w);
+    setGenHeight(h);
     setGenStatus('generating');
     setGenError(null);
     setGenPreviewUrl(null);
@@ -412,7 +418,7 @@ export default function ObjectEditor() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           description: genDescription.trim(),
-          image_size: { width: genWidth, height: genHeight },
+          image_size: { width: w, height: h },
           no_background: true,
           view: 'low top-down',
         }),
@@ -725,23 +731,23 @@ export default function ObjectEditor() {
             style={{ ...S.textInput, height: 72, resize: 'vertical' }}
             value={genDescription}
             onChange={e => setGenDescription(e.target.value)}
-            placeholder="e.g. rusted vending machine, low top-down view, transparent background"
+            placeholder="e.g. rusted vending machine, transparent background"
             disabled={genStatus === 'generating'}
           />
 
           <div style={S.sectionLabel}>size (px)</div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="number" min="16" max="400" value={genWidth}
-              onChange={e => setGenWidth(Math.max(16, Math.min(400, Number(e.target.value))))}
+            <input type="number" min="16" max="512" value={genWidth}
+              onChange={e => setGenWidth(Math.max(16, Math.min(512, Number(e.target.value))))}
               style={{ ...S.textInput, width: 70 }}
               disabled={genStatus === 'generating'} />
             <span style={{ color: C.textDim, fontSize: 10 }}>×</span>
-            <input type="number" min="16" max="400" value={genHeight}
-              onChange={e => setGenHeight(Math.max(16, Math.min(400, Number(e.target.value))))}
+            <input type="number" min="16" max="512" value={genHeight}
+              onChange={e => setGenHeight(Math.max(16, Math.min(512, Number(e.target.value))))}
               style={{ ...S.textInput, width: 70 }}
               disabled={genStatus === 'generating'} />
           </div>
-          <div style={S.hint}>transparent background · low top-down · max 400×400</div>
+          <div style={S.hint}>transparent background · low top-down · size rounded up to multiple of 4 · max 512×512</div>
 
           <button
             style={{ ...S.exportBtn, marginTop: 8, opacity: genStatus === 'generating' || !genDescription.trim() ? 0.5 : 1 }}
