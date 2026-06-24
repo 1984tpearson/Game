@@ -39,9 +39,6 @@ const HEX_DIRS = [
 ];
 
 function hexToScreen(q, r, originX, originY, stepX, stepY) {
-  // Pointy-top axial -> pixel. Rows (r) stack vertically at full step;
-  // each row is offset horizontally by half a step per row, so columns
-  // (q) zigzag rather than stacking straight.
   const x = stepX * (q + r / 2);
   const y = stepY * r;
   return { sx: originX + x, sy: originY + y };
@@ -61,19 +58,8 @@ function pointsToStr(pts) {
 }
 
 // ---------------- Generic AI call helper ----------------
-// Theme-agnostic: takes whatever system prompt and message history the
-// config/game logic builds; the engine doesn't know or care what's in them.
-//
-// NOTE: this currently calls api.anthropic.com directly with no API key,
-// which only worked inside the Claude.ai artifact sandbox (auth was
-// injected there). On a real deployed site this call has nowhere to get
-// credentials from and will fail — so it fails loudly and clearly rather
-// than crashing, until a backend endpoint (e.g. a Vercel/Netlify
-// serverless function holding the API key) is wired up to replace the
-// URL below. See README.md for notes on adding that.
-
-const AI_BACKEND_CONFIGURED = false; // flip to true once a backend endpoint exists
-const AI_ENDPOINT = "https://api.anthropic.com/v1/messages"; // replace with your backend URL
+const AI_BACKEND_CONFIGURED = false;
+const AI_ENDPOINT = "https://api.anthropic.com/v1/messages";
 
 async function callClaude(systemPrompt, messages) {
   if (!AI_BACKEND_CONFIGURED) {
@@ -99,60 +85,7 @@ function stripJson(text) {
   return text.replace(/```json|```/g, "").trim();
 }
 
-// =====================================================================
-// MAIN ENGINE COMPONENT
-// =====================================================================
-//
-// Props (the "config"):
-//
-// theme: { colors, fonts, tileImg, tileImgW, tileImgH, tileSkirt, tileHeadroom }
-// scenes: {
-//   [sceneId]: {
-//     floor: [[q,r], ...],
-//     entities: [
-//       {
-//         q, r,                 // anchor position
-//         footprint: [[q,r],...]  // OPTIONAL: extra tiles occupied (multi-tile
-//                                  // objects like buildings). Anchor tile is
-//                                  // always included automatically — don't
-//                                  // repeat it here.
-//         id, label, color,
-//         kind,                  // free-form string the game's onInteract
-//                                  // switches on: 'casework' | 'info' | 'npc'
-//                                  // | 'exit' | 'object' | anything else
-//         blocksMovement: bool,  // occupies the tile(s) like a wall
-//         trigger: 'enter' | 'use' | null,
-//                                  // 'enter' fires on walk-onto (classic
-//                                  // interactable behavior). 'use' is
-//                                  // reserved for a future interact-button.
-//                                  // null/omitted = decorative, no trigger.
-//         toScene, spawn         // only meaningful for kind:'exit' entities
-//       }, ...
-//     ],
-//     spawn: { q, r },
-//     generative: bool — if true, this scene's content is AI-generated
-//                 on first visit and persisted (e.g. a "world")
-//   }
-// }
-// startScene: sceneId to begin in
-// onInteract(entity, helpers): called when player walks onto (or later,
-//   uses) an entity with trigger:'enter' whose kind isn't 'exit' (exits are
-//   handled generically by the engine). helpers exposes openOverlay,
-//   closeOverlay, callClaude, etc. so config-level code decides what
-//   happens (open a chat terminal, show info text, trigger generation).
-// generateScene(sceneId, context): async fn, called the first time a
-//   "generative" scene is entered; returns scene content to merge in
-//   (e.g. entities, description) and is persisted for return visits.
-// renderOverlay(overlay, helpers): config-supplied render function for
-//   whatever overlay UI the game wants (chat terminal, NPC dialogue,
-//   info popup) — the engine just manages overlay open/close state and
-//   gives the config full control of what's drawn inside it.
-//
-// =====================================================================
-
-// Returns every (q,r) tile an entity occupies: its anchor plus any
-// footprint tiles, so multi-tile objects (buildings etc) can be checked
-// for movement-blocking and interaction in one place.
+// Returns every (q,r) tile an entity occupies: its anchor plus any footprint tiles.
 function entityTiles(entity) {
   const tiles = [{ q: entity.q, r: entity.r }];
   if (entity.footprint) {
@@ -168,8 +101,6 @@ function entityOccupiesTile(entity, q, r) {
 }
 
 // ---------------- A* pathfinder ----------------
-// Returns array of {q,r} steps from start to goal (excluding start),
-// or null if no path exists.
 function hexAstarClean(startQ, startR, goalQ, goalR, floor, blockedTiles) {
   const key = (q, r) => `${q},${r}`;
   const heuristic = (q, r) => Math.max(Math.abs(q - goalQ), Math.abs(r - goalR), Math.abs((q + r) - (goalQ + goalR)));
@@ -218,7 +149,6 @@ function hexAstarClean(startQ, startR, goalQ, goalR, floor, blockedTiles) {
   return null;
 }
 
-// Derive direction name from one hex step
 function dirBetween(fromQ, fromR, toQ, toR) {
   const dq = toQ - fromQ;
   const dr = toR - fromR;
@@ -226,13 +156,11 @@ function dirBetween(fromQ, fromR, toQ, toR) {
   return dir ? dir.name : null;
 }
 
-// Convert screen pixel (relative to canvas top-left) back to nearest hex
 function screenToHex(px, py, originX, originY, stepX, stepY) {
   const x = px - originX;
   const y = py - originY;
   const r = y / stepY;
   const q = x / stepX - r / 2;
-  // Round to nearest hex using cube coordinate rounding
   const s = -q - r;
   let rq = Math.round(q), rr = Math.round(r), rs = Math.round(s);
   const dq = Math.abs(rq - q), dr = Math.abs(rr - r), ds = Math.abs(rs - s);
@@ -252,19 +180,25 @@ function HexEngine({
   headerSubtitle,
   resolveTiles,
   playerSprites, // OPTIONAL: {south, north, east, west, ...} base64 data URLs from character builder
+  onPlayerStep,  // OPTIONAL: called once per step taken; used by the game layer to tick NPC turns.
+                 // Signature: onPlayerStep({ sceneId, playerPos })
+  npcState: npcStateProp,  // OPTIONAL: {[entityId]: {q, r, facing}} — NPC positions/facings managed by
+                 // the game layer's turn tick. Engine reads this for rendering only.
 }) {
   const [sceneId, setSceneId] = useState(startScene);
   const [scenes, setScenes] = useState(initialScenes);
   const [playerPos, setPlayerPos] = useState({ ...initialScenes[startScene].spawn });
-  const [playerFacing, setPlayerFacing] = useState("south");
+  const [playerFacing, setPlayerFacing] = useState("south-west");
   const [overlay, setOverlay] = useState(null);
   const [sceneLoading, setSceneLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [resolvedTiles, setResolvedTiles] = useState({}); // {tileId: imageDataUrl}
+  const [resolvedTiles, setResolvedTiles] = useState({});
 
   const scene = scenes[sceneId];
   const floor = floorSet(scene.floor);
   const entities = scene.entities || [];
+  // npcState falls back to empty object if the game layer hasn't provided it.
+  const npcState = npcStateProp || {};
 
   const T = theme;
   const stepX = T.tileImgW;
@@ -275,11 +209,6 @@ function HexEngine({
   const centerY = CANVAS_H / 2;
 
   // ---------------- Tile resolution ----------------
-  // Floor cells can be [q, r] (default art) or [q, r, tileId] (a specific
-  // library tile). Whenever the active scene's floor references IDs we
-  // haven't fetched yet, resolve them once and cache the result for the
-  // life of the component — switching scenes back and forth won't re-fetch
-  // tiles already resolved.
   useEffect(() => {
     if (!resolveTiles) return;
     const neededIds = scene.floor
@@ -292,13 +221,8 @@ function HexEngine({
         if (cancelled) return;
         setResolvedTiles((prev) => ({ ...prev, ...fetched }));
       })
-      .catch(() => {
-        // Resolution failures fall back to default art per-cell at render
-        // time; nothing else to do here.
-      });
-    return () => {
-      cancelled = true;
-    };
+      .catch(() => {});
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sceneId, scene.floor]);
 
@@ -308,18 +232,24 @@ function HexEngine({
   const pathRef = useRef([]);
   const playerPosRef = useRef(playerPos);
   useEffect(() => { playerPosRef.current = playerPos; }, [playerPos]);
+  // Keep a stable ref to onPlayerStep so the interval closure always
+  // calls the latest version without needing to restart the interval.
+  const onPlayerStepRef = useRef(onPlayerStep);
+  useEffect(() => { onPlayerStepRef.current = onPlayerStep; }, [onPlayerStep]);
 
-  // Map hex direction names to sprite filenames (6 dirs -> 8 sprites)
+  // Map hex direction names to sprite keys (6 movement dirs -> 8 sprite slots).
+  // NOTE: 'north' and 'south' sprites exist in the sheet but are NEVER selected
+  // during play — the pointy-top hex grid has no due-north or due-south movement.
+  // Those slots are reserved for future use (cutscenes, forced facing, etc).
   const DIR_TO_SPRITE = {
-    E:  "east",
-    W:  "north-west",
-    NE: "north-east",
-    NW: "north-west",
-    SE: "south-east",
-    SW: "west",
+    E:  'east',
+    W:  'west',
+    NE: 'north-east',
+    NW: 'north-west',
+    SE: 'south-east',
+    SW: 'south-west',
   };
 
-  // Stop any in-progress walk
   function cancelWalk() {
     if (walkTimerRef.current) {
       clearInterval(walkTimerRef.current);
@@ -341,8 +271,12 @@ function HexEngine({
       }
       const cur = playerPosRef.current;
       const dirName = dirBetween(cur.q, cur.r, next.q, next.r);
-      if (dirName) setPlayerFacing(DIR_TO_SPRITE[dirName] || "south");
+      if (dirName) setPlayerFacing(DIR_TO_SPRITE[dirName] || 'south-west');
       setPlayerPos({ q: next.q, r: next.r });
+      // Each step is one player action — notify the game layer to tick NPCs.
+      if (onPlayerStepRef.current) {
+        onPlayerStepRef.current({ sceneId, playerPos: { q: next.q, r: next.r } });
+      }
       if (pathRef.current.length === 0) {
         cancelWalk();
         if (onArrive) onArrive();
@@ -350,31 +284,21 @@ function HexEngine({
     }, 300);
   }
 
-  // Handle click on canvas: convert pixel -> hex -> pathfind -> walk
   function handleCanvasClick(e) {
     if (overlay) return;
     cancelWalk();
     const rect = e.currentTarget.getBoundingClientRect();
-    // Canvas is scaled 2x so divide pixel offset by 2
     const px = (e.clientX - rect.left) / 2;
     const py = (e.clientY - rect.top) / 2;
-    // camX/camY at current player pos
     const ps = hexToScreen(playerPosRef.current.q, playerPosRef.current.r, 0, 0, stepX, stepY);
     const cx = centerX - ps.sx;
     const cy = centerY - ps.sy;
     const { q: tq, r: tr } = screenToHex(px, py, cx, cy, stepX, stepY);
 
-    // Check if clicked tile is on the floor
     if (!floor.has(hexKey(tq, tr))) return;
 
-    // Check if there's an entity there
-    const targetEntity = entities.find(e => e.trigger === "enter" && entityOccupiesTile(e, tq, tr));
-
-    // Build blocked set: non-walkable tiles + blocksMovement entities + trigger tiles,
-    // but exclude the goal tile so the player can walk directly onto it when clicked.
     const goalKey = hexKey(tq, tr);
 
-    // Non-walkable floor tiles from the tile library
     const nonWalkableTileKeys = new Set(
       scene.floor
         .filter(([fq, fr, tileId]) => tileId && resolvedTiles[tileId]?.walkable === false)
@@ -391,11 +315,8 @@ function HexEngine({
     ]);
 
     const cur = playerPosRef.current;
-    // If clicking current tile, do nothing
     if (tq === cur.q && tr === cur.r) return;
 
-    // First try pathfinding avoiding trigger tiles.
-    // If no path exists, fall back to treating trigger tiles as passable.
     let path = hexAstarClean(cur.q, cur.r, tq, tr, floor, blockedSet);
     if (!path || path.length === 0) {
       const blockedSetNoTriggers = new Set([
@@ -421,7 +342,7 @@ function HexEngine({
       setSceneLoading(true);
       setError(null);
       try {
-        const context = { sceneId: targetSceneId, scene: target, allScenes: scenes };
+        const context = { sceneId: targetSceneId, scene: target, allScenes: scenes, callClaude, stripJson };
         const generated = await generateScene(targetSceneId, context);
         setScenes((prev) => ({
           ...prev,
@@ -439,10 +360,6 @@ function HexEngine({
   }
 
   // ---------------- Interaction detection ----------------
-  // Runs whenever playerPos or sceneId changes. Entities with kind:'exit'
-  // are handled generically by the engine (scene transition); everything
-  // else with trigger:'enter' is delegated to the config's onInteract
-  // callback. Entities with no trigger (or trigger:'use') don't fire here.
 
   React.useEffect(() => {
     if (overlay) return;
@@ -478,9 +395,7 @@ function HexEngine({
   const faceH = T.tileImgH - T.tileSkirt - (T.tileHeadroom || 0);
   const headroom = T.tileHeadroom || 0;
 
-  // Player's position in unshifted hex-space
   const playerScreen = hexToScreen(playerPos.q, playerPos.r, 0, 0, stepX, stepY);
-  // Everything is offset so the player's hex lands on (centerX, centerY)
   const camX = centerX - playerScreen.sx;
   const camY = centerY - playerScreen.sy;
 
@@ -500,7 +415,7 @@ function HexEngine({
           {headerTitle ? headerTitle(scene, sceneId) : scene.name || sceneId}
         </span>
         <span style={{ ...baseStyles.headerSub, color: T.colors.textDim }}>
-          {headerSubtitle || "hex D-pad below · walk onto things to interact"}
+          {headerSubtitle || "walk onto things to interact"}
         </span>
       </header>
 
@@ -512,7 +427,6 @@ function HexEngine({
       )}
 
       <div style={baseStyles.gameArea}>
-        {/* Canvas: 320x220 logical, scaled 2x to 640x440, overflow hidden */}
         <div
           style={{ width: CANVAS_W * 2, height: CANVAS_H * 2, overflow: "hidden", position: "relative", imageRendering: "pixelated", cursor: "pointer" }}
           onClick={handleCanvasClick}
@@ -522,7 +436,6 @@ function HexEngine({
             <div style={{ position: "absolute", top: 0, left: 0, width: CANVAS_W, height: CANVAS_H }}>
               {tiles.map(({ q, r, tileId, yOffset }) => {
                 const { sx, sy } = hexToScreen(q, r, camX, camY, stepX, stepY);
-                const isMarked = isTileOccupied(q, r);
                 const img = (tileId && resolvedTiles[tileId]?.imageDataUrl) || T.tileImg;
                 return (
                   <img
@@ -567,6 +480,42 @@ function HexEngine({
                     </g>
                   );
                 }
+                // NPC entities: render current sprite from npcState (position +
+                // facing managed by the game layer's turn tick), falling back to
+                // the entity's own position if state hasn't initialised yet.
+                if (e.kind === 'npc' && e.npcSprites) {
+                  const state = npcState[e.id];
+                  const nq = state ? state.q : e.q;
+                  const nr = state ? state.r : e.r;
+                  const facing = state ? state.facing : 'south-west';
+                  const { sx: nsx, sy: nsy } = hexToScreen(nq, nr, camX, camY, stepX, stepY);
+                  const spriteUrl = renderSprite(e.npcSprites, facing);
+                  const spriteW = 116;
+                  const spriteH = 116;
+                  const spriteFeetOffset = 31;
+                  if (spriteUrl) {
+                    return (
+                      <g key={e.id}>
+                        <ellipse cx={nsx} cy={nsy - 6} rx="10" ry="4" fill="#000" opacity="0.35" />
+                        <image
+                          href={spriteUrl}
+                          x={nsx - spriteW / 2}
+                          y={nsy - spriteH + spriteFeetOffset}
+                          width={spriteW}
+                          height={spriteH}
+                          style={{ imageRendering: 'pixelated' }}
+                        />
+                      </g>
+                    );
+                  }
+                  // Fallback dot if sprites haven't loaded
+                  return (
+                    <g key={e.id}>
+                      <ellipse cx={nsx} cy={nsy + 4} rx="9" ry="4" fill="#000" opacity="0.35" />
+                      <circle cx={nsx} cy={nsy - 4} r="7" fill={e.color || T.colors.accent} opacity="0.9" />
+                    </g>
+                  );
+                }
                 if (e.imageDataUrl) {
                   const iw = e.widthPx || 39;
                   const ih = e.heightPx || 39;
@@ -603,8 +552,8 @@ function HexEngine({
                   const cell = scene.floor.find(([fq, fr]) => fq === playerPos.q && fr === playerPos.r);
                   return cell?.[3] ?? 0;
                 })();
-                const spriteUrl = (playerSprites && playerSprites[playerFacing])
-                  ? playerSprites[playerFacing]
+                const spriteUrl = (playerSprites && renderSprite(playerSprites, playerFacing))
+                  ? renderSprite(playerSprites, playerFacing)
                   : `${import.meta.env.BASE_URL}characters/player/skinny_half_man_half_rat/${playerFacing}.png`;
                 return (
                   <g>
@@ -625,10 +574,6 @@ function HexEngine({
         </div>
       </div>
 
-      {/* Overlay: fully delegated to config's renderOverlay function.
-          The engine only owns open/close state; what's drawn inside
-          (chat terminal, NPC dialogue, info popup, anything else) is
-          entirely up to the game built on top of this engine. */}
       {overlay && renderOverlay && (
         <div style={baseStyles.overlayBackdrop} onClick={closeOverlay}>
           <div
@@ -642,25 +587,6 @@ function HexEngine({
     </div>
   );
 }
-
-function hexBtnStyle(T) {
-  return {
-    width: "56px",
-    height: "44px",
-    background: T.colors.panel,
-    border: `1px solid ${T.colors.accent}`,
-    color: T.colors.accent,
-    fontSize: "11px",
-    fontFamily: T.fonts.body,
-    borderRadius: "4px",
-  };
-}
-
-// =====================================================================
-// BASE STYLES — structural only, no color/font decisions (those come
-// from the theme prop). Game-specific chrome (chat bubbles etc.) is the
-// config's responsibility via renderOverlay.
-// =====================================================================
 
 const baseStyles = {
   root: {
@@ -700,18 +626,6 @@ const baseStyles = {
     padding: "10px",
     position: "relative",
   },
-  hexpad: {
-    marginTop: "14px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "4px",
-    userSelect: "none",
-  },
-  hexpadRow: {
-    display: "flex",
-    gap: "4px",
-  },
   overlayBackdrop: {
     position: "absolute",
     inset: 0,
@@ -730,28 +644,15 @@ const baseStyles = {
 };
 
 // =====================================================================
-// PART 2: WRECK & RUIN — this game's content, built on the engine above.
+// PART 2: WRECK & RUIN — game content built on the engine above.
 // =====================================================================
 
-// =====================================================================
-// WRECK & RUIN — config for the generic HexEngine
-// =====================================================================
-// This file contains everything specific to this particular game:
-// the Tally-Iron ship, CASEWORK, the Mieville-esque world generation,
-// the palette and fonts, and the chat/dialogue overlay UI. None of
-// this lives in the engine itself — swap this file out entirely to
-// build a different game on the same engine.
-// =====================================================================
-
-// ---------------- Tile art ----------------
 const HEX_TILE_IMG = "data:image/png;base64,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";
 
 const TILE_IMG_W = 39;
-const TILE_IMG_H = 33; // 3px headroom + 24px top face + 6px skirt
+const TILE_IMG_H = 33;
 const TILE_SKIRT = 6;
-const TILE_HEADROOM = 3; // px of space above the top face for tall art (grass, etc) to poke into
-
-// ---------------- Theme ----------------
+const TILE_HEADROOM = 3;
 
 const THEME = {
   colors: {
@@ -777,8 +678,6 @@ const THEME = {
   tileHeadroom: TILE_HEADROOM,
 };
 
-// ---------------- System prompts ----------------
-
 const SHIP_SYSTEM_PROMPT = `You are CASEWORK, the administrative intelligence of a salvage vessel called the Tally-Iron. You are not a clean helpful assistant — you are a remade bureaucratic entity, part-organic, grown out of old harbor-authority paperwork systems and grafted into the ship decades ago. You speak in the register of a tired, faintly resentful clerk: precise, procedural, occasionally cutting, prone to citing invented regulations and case numbers. You secretly care about the crew but will never say so directly.
 
 Rules:
@@ -790,11 +689,6 @@ Rules:
 const WORLD_SYSTEM_PROMPT = `You are a generative engine for a weird-fiction space RPG in the tradition of China Mieville — baroque, grotesque, politically textured, bureaucratic horror mixed with biotech and industrial decay. Respond ONLY with valid JSON, no markdown fences, no preamble.`;
 
 const NPC_SYSTEM_PROMPT = `You are roleplaying as an NPC in a Mieville-esque weird-fiction space RPG. Stay fully in character based on the description given. Keep responses to 2-3 sentences, strange and specific, never generic. No markdown, asterisks, or emoji. Never break character.`;
-
-// ---------------- Scenes ----------------
-// "ship" is a fixed, hand-authored scene. "world" is generative: it's
-// AI-generated the first time the player walks through its exit, then
-// persisted (re-visiting it won't regenerate).
 
 const SCENES = {
   ship: {
@@ -830,8 +724,6 @@ const SCENES = {
   },
 };
 
-// ---------------- Generation logic ----------------
-
 async function generateWorldScene(sceneId, { callClaude, stripJson }) {
   const prompt = `Generate a new world for a salvage crew to explore, first visit. Respond with this exact JSON shape:
 {
@@ -861,12 +753,22 @@ Generate exactly 2 npcs.`;
 }
 
 // =====================================================================
-// MAIN GAME COMPONENT
+// SPRITE RENDERING
 // =====================================================================
+// All sprite lookups go through renderSprite() rather than accessing
+// sprites[facing] directly. Currently sprites are plain {direction: dataUrl}
+// objects, but this function is the single swap point for when animations
+// are added (strips, frame sequences, action states like idle/walk/attack).
+//
+// Future shape: sprites[direction][actionState][frameIndex]
+// For now it returns the URL for the requested facing, falling back to
+// 'south-west' (the default NPC facing on hex grids).
+function renderSprite(sprites, facing) {
+  if (!sprites) return null;
+  return sprites[facing] || sprites['south-west'] || sprites['south'] || Object.values(sprites)[0] || null;
+}
 
 export default function WreckAndRuin({ scenes: propScenes, startScene: propStartScene, playerSprites }) {
-  // Use scenes/startScene from props (loaded from DB by GamePage) if provided,
-  // otherwise fall back to the hardcoded SCENES for local dev convenience.
   const resolvedScenes = propScenes || SCENES;
   const resolvedStartScene = propStartScene || "ship";
   const [shipMessages, setShipMessages] = useState([
@@ -879,15 +781,143 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
   const [npcInput, setNpcInput] = useState("");
   const [npcLoading, setNpcLoading] = useState(false);
 
+  // ----------------------------------------------------------------
+  // NPC STATE & TURN SYSTEM
+  // ----------------------------------------------------------------
+  // npcState: { [entityId]: { q, r, facing, ticksUntilMove } }
+  // Keyed by entity id. Initialised from entity positions on first render
+  // and whenever scenes change. The engine renders NPCs from this state;
+  // the actual entity q/r in the scene data is treated as the spawn point.
+  //
+  // npcBehaviour types (on entity):
+  //   'idle_drift'  — occasional random step (default)
+  //   'stationary'  — never moves (stub)
+  //   'patrol'      — follows a set path (stub, future)
+  const [npcState, setNpcState] = useState({});
+
+  function initNpcStateForScene(sceneId, scenes) {
+    const scene = scenes[sceneId];
+    if (!scene) return;
+    const entities = scene.entities || [];
+    setNpcState(prev => {
+      const next = { ...prev };
+      for (const e of entities) {
+        if (e.kind === 'npc' && !next[e.id]) {
+          next[e.id] = {
+            q: e.q,
+            r: e.r,
+            facing: 'south-west',
+            // Randomise first move delay so NPCs don't all step simultaneously.
+            ticksUntilMove: 5 + Math.floor(Math.random() * 4),
+          };
+        }
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    initNpcStateForScene(resolvedStartScene, resolvedScenes);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedScenes]);
+
+  const HEX_DIRS_NPC = [
+    { name: 'E',  dq:  1, dr:  0 },
+    { name: 'NE', dq:  1, dr: -1 },
+    { name: 'NW', dq:  0, dr: -1 },
+    { name: 'W',  dq: -1, dr:  0 },
+    { name: 'SW', dq: -1, dr:  1 },
+    { name: 'SE', dq:  0, dr:  1 },
+  ];
+
+  // NOTE: 'north' and 'south' sprite slots exist in PixelLab exports but are
+  // never used during play — pointy-top hex grids have no due-N or due-S movement.
+  const NPC_DIR_TO_SPRITE = {
+    E:  'east',
+    W:  'west',
+    NE: 'north-east',
+    NW: 'north-west',
+    SE: 'south-east',
+    SW: 'south-west',
+  };
+
+  // Called by HexEngine once per player step. Ticks all NPCs in the current scene.
+  // Each NPC gets exactly one action per player step (turn-based parity).
+  // Future: combat actions, patrol updates, dialogue interrupts will all hook here.
+  function handlePlayerStep({ sceneId, playerPos: _playerPos }) {
+    const scene = resolvedScenes[sceneId];
+    if (!scene) return;
+    const entities = scene.entities || [];
+    const floorKeys = new Set(scene.floor.map(([q, r]) => `${q},${r}`));
+
+    setNpcState(prev => {
+      const next = { ...prev };
+      for (const e of entities) {
+        if (e.kind !== 'npc') continue;
+        const state = next[e.id];
+        if (!state) continue;
+
+        const behaviour = e.npcBehaviour || 'idle_drift';
+
+        if (behaviour === 'stationary') continue;
+        if (behaviour === 'patrol') continue; // stub — treat as stationary until implemented
+
+        if (behaviour === 'idle_drift') {
+          const ticks = state.ticksUntilMove - 1;
+          if (ticks > 0) {
+            next[e.id] = { ...state, ticksUntilMove: ticks };
+            continue;
+          }
+          // Pick a random passable adjacent tile.
+          const shuffled = [...HEX_DIRS_NPC].sort(() => Math.random() - 0.5);
+          let moved = false;
+          for (const dir of shuffled) {
+            const nq = state.q + dir.dq;
+            const nr = state.r + dir.dr;
+            const key = `${nq},${nr}`;
+            if (!floorKeys.has(key)) continue;
+            const blocked = entities.some(
+              oe => oe.id !== e.id && oe.blocksMovement && oe.q === nq && oe.r === nr
+            );
+            if (blocked) continue;
+            next[e.id] = {
+              q: nq,
+              r: nr,
+              facing: NPC_DIR_TO_SPRITE[dir.name] || 'south-west',
+              ticksUntilMove: 5 + Math.floor(Math.random() * 4),
+            };
+            moved = true;
+            break;
+          }
+          if (!moved) {
+            next[e.id] = { ...state, ticksUntilMove: 5 + Math.floor(Math.random() * 4) };
+          }
+        }
+      }
+      return next;
+    });
+  }
+
   function onInteract(interactable, helpers) {
     if (interactable.kind === "casework") {
       helpers.openOverlay({ type: "casework", helpers });
     } else if (interactable.kind === "info") {
       helpers.openOverlay({ type: "info", label: interactable.label, text: interactable.text });
     } else if (interactable.kind === "npc") {
-      const npc = interactable.npc;
+      // Build a unified npc descriptor from either:
+      //   a) A map-placed NPC stamped by GamePage (npcName, npcRole, etc.)
+      //   b) A generative world NPC with its own .npc sub-object
+      const npc = interactable.npc || {
+        name: interactable.npcName || interactable.label || 'Unknown',
+        role: interactable.npcRole || '',
+        blurb: interactable.npcBlurb || '',
+        personality_notes: interactable.npcPersonalityNotes || '',
+      };
       if (!npcChat[npc.name]) {
-        setNpcChat((prev) => ({ ...prev, [npc.name]: [{ role: "assistant", content: npc.blurb }] }));
+        setNpcChat((prev) => ({
+          ...prev,
+          [npc.name]: npc.blurb ? [{ role: "assistant", content: npc.blurb }] : [],
+        }));
       }
       helpers.openOverlay({ type: "npc", npc, helpers });
     }
@@ -919,7 +949,13 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
     setNpcInput("");
     setNpcLoading(true);
     try {
-      const sys = `${NPC_SYSTEM_PROMPT}\n\nCharacter: ${npc.name}, ${npc.role}. ${npc.blurb}`;
+      const characterDesc = [
+        `Character: ${npc.name}`,
+        npc.role ? `Role: ${npc.role}` : '',
+        npc.blurb ? npc.blurb : '',
+        npc.personality_notes ? `Personality: ${npc.personality_notes}` : '',
+      ].filter(Boolean).join('. ');
+      const sys = `${NPC_SYSTEM_PROMPT}\n\n${characterDesc}`;
       const reply = await helpers.callClaude(sys, next);
       setNpcChat((prev) => ({ ...prev, [npc.name]: [...next, { role: "assistant", content: reply }] }));
     } catch (e) {
@@ -971,19 +1007,31 @@ export default function WreckAndRuin({ scenes: propScenes, startScene: propStart
       scenes={resolvedScenes}
       startScene={resolvedStartScene}
       onInteract={onInteract}
-      generateScene={(sceneId, ctx) =>
-        sceneId === "world" ? generateWorldScene(sceneId, ctx) : Promise.resolve({})
-      }
+      generateScene={(sceneId, ctx) => {
+        if (sceneId === 'world') {
+          return generateWorldScene(sceneId, ctx).then(generated => {
+            // Initialise NPC state for any NPCs spawned by world generation.
+            if (generated.entities) {
+              const mockScene = { entities: generated.entities, floor: resolvedScenes[sceneId]?.floor || [] };
+              initNpcStateForScene(sceneId, { ...resolvedScenes, [sceneId]: mockScene });
+            }
+            return generated;
+          });
+        }
+        return Promise.resolve({});
+      }}
       resolveTiles={getTilesByIds}
       renderOverlay={renderOverlay}
       playerSprites={playerSprites || null}
-      headerSubtitle="hex D-pad below · walk onto things to interact"
+      headerSubtitle="walk onto things to interact"
+      onPlayerStep={handlePlayerStep}
+      npcState={npcState}
     />
   );
 }
 
 // =====================================================================
-// OVERLAY PANELS — this game's specific chat/dialogue UI
+// OVERLAY PANELS
 // =====================================================================
 
 function OverlayHeader({ title, onClose, theme }) {
@@ -1025,7 +1073,7 @@ function CaseworkPanel({ messages, input, setInput, loading, onSend, onClose, th
 function NpcPanel({ npc, messages, input, setInput, loading, onSend, onClose, theme }) {
   return (
     <>
-      <OverlayHeader title={`${npc.name} — ${npc.role}`} onClose={onClose} theme={theme} />
+      <OverlayHeader title={`${npc.name}${npc.role ? ' — ' + npc.role : ''}`} onClose={onClose} theme={theme} />
       <div style={{ padding: "12px 14px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "8px", fontSize: "13px", lineHeight: 1.5 }}>
         {messages.map((m, i) => (
           <div key={i} style={{ color: m.role === "assistant" ? theme.colors.text : theme.colors.player, fontFamily: m.role === "assistant" ? theme.fonts.flavor : theme.fonts.body, fontStyle: m.role === "assistant" ? "italic" : "normal" }}>

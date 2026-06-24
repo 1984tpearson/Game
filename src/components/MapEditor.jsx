@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { listTiles } from '../lib/tiles.js';
 import { listObjects } from '../lib/objects.js';
+import { listNpcTemplates } from '../lib/characters.js';
 import { listMaps, loadMap, saveMap, updateMap, setStartScene } from '../lib/maps.js';
 
 // =================================================================
@@ -22,7 +23,7 @@ const DEFAULT_TILE_IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACcAAAAe
 
 const CANVAS_W = 640;
 const CANVAS_H = 440;
-const MAP_W = 4000;  // large virtual canvas — effectively unbounded painting area
+const MAP_W = 4000;
 const MAP_H = 4000;
 const ORIGIN_X = MAP_W / 2;
 const ORIGIN_Y = MAP_H / 2;
@@ -97,12 +98,10 @@ export default function MapEditor() {
   const [sceneName, setSceneName] = useState("New Scene");
   const [sceneId, setSceneId] = useState("scene_1");
   const [exportStr, setExportStr] = useState("");
-  const [zoom, setZoom] = useState(2); // 1x, 2x, 3x, 4x — default 2x
+  const [zoom, setZoom] = useState(2);
   const canvasRef = useRef(null);
   const viewportRef = useRef(null);
 
-  // Scroll to centre of the virtual canvas on first render so the
-  // origin (where tiles start) is in the middle of the viewport.
   useEffect(() => {
     if (viewportRef.current) {
       viewportRef.current.scrollLeft = (MAP_W / 2) - CANVAS_W / 2;
@@ -110,11 +109,10 @@ export default function MapEditor() {
     }
   }, []);
 
-  // Map save/load state
   const [loadedMapId, setLoadedMapId] = useState(null);
-  const [mapSaveStatus, setMapSaveStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
+  const [mapSaveStatus, setMapSaveStatus] = useState(null);
   const [mapSaveError, setMapSaveError] = useState(null);
-  const [setStartStatus, setSetStartStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
+  const [setStartStatus, setSetStartStatus] = useState(null);
   const [mapLibrary, setMapLibrary] = useState([]);
   const [mapLibraryLoading, setMapLibraryLoading] = useState(false);
   const [mapLibraryError, setMapLibraryError] = useState(null);
@@ -123,29 +121,26 @@ export default function MapEditor() {
   const floorSet = new Set(floor.map(([q, r]) => hexKey(q, r)));
   const selectedEntity = entities.find((e) => e.id === selectedEntityId) || null;
   const isPainting = useRef(false);
-  // Cells already touched during the current drag stroke, so a single
-  // continuous drag doesn't toggle a tile on-then-off as the pointer
-  // crosses back over it, and so floor placement reads as "paint" not
-  // "click each cell precisely."
   const paintedThisStroke = useRef(new Set());
 
-  // Tile library: tiles saved from the Tile Fabricator. `activeTile` is
-  // the one currently used to paint floor tiles with, defaulting to the
-  // game's built-in art until the library loads or one is picked.
   const [tileLibrary, setTileLibrary] = useState([]);
   const [tileLibraryLoading, setTileLibraryLoading] = useState(true);
   const [tileLibraryError, setTileLibraryError] = useState(null);
-  const [activeTileId, setActiveTileId] = useState(null); // null = use DEFAULT_TILE_IMG
-  const [tileYOffset, setTileYOffset] = useState(0); // -6 | 0 | +6
+  const [activeTileId, setActiveTileId] = useState(null);
+  const [tileYOffset, setTileYOffset] = useState(0);
 
-  // Object library: objects saved from the Pixel Editor (object mode).
-  // activeObjectId = the object from the library that will be placed when
-  // the "Object" sub-tool is active; null means manual entity placement.
   const [objLibrary, setObjLibrary] = useState([]);
   const [objLibraryLoading, setObjLibraryLoading] = useState(true);
   const [objLibraryError, setObjLibraryError] = useState(null);
   const [activeObjectId, setActiveObjectId] = useState(null);
-  const [objSubTool, setObjSubTool] = useState('manual'); // 'manual' | 'library'
+  const [objSubTool, setObjSubTool] = useState('manual');
+
+  // NPC template library: templates from npc_templates table.
+  // activeNpcId = template to stamp when clicking a floor tile in NPC mode.
+  const [npcLibrary, setNpcLibrary] = useState([]);
+  const [npcLibraryLoading, setNpcLibraryLoading] = useState(true);
+  const [npcLibraryError, setNpcLibraryError] = useState(null);
+  const [activeNpcId, setActiveNpcId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,11 +152,13 @@ export default function MapEditor() {
       .then((objs) => { if (!cancelled) setObjLibrary(objs); })
       .catch((e) => { if (!cancelled) setObjLibraryError(e.message || 'Failed to load object library.'); })
       .finally(() => { if (!cancelled) setObjLibraryLoading(false); });
+    listNpcTemplates()
+      .then((npcs) => { if (!cancelled) setNpcLibrary(npcs); })
+      .catch((e) => { if (!cancelled) setNpcLibraryError(e.message || 'Failed to load NPC templates.'); })
+      .finally(() => { if (!cancelled) setNpcLibraryLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
-  // Zoom-aware screen position: scales both the origin offset and the
-  // hex step distances so tiles render correctly at any zoom level.
   function hexToScreenZ(q, r) {
     const x = STEP_X * (q + r / 2);
     const y = STEP_Y * r;
@@ -179,10 +176,6 @@ export default function MapEditor() {
     return screenToHex(sx, sy);
   }
 
-  // Applies the current tool at a given hex. `isStrokeStart` resets the
-  // per-drag dedupe set; called once on pointer-down and again on every
-  // pointer-move while the mouse/touch is held, so floor/erase behave as
-  // continuous painting rather than one cell per click.
   function applyAt(q, r, isStrokeStart) {
     const key = hexKey(q, r);
 
@@ -204,17 +197,12 @@ export default function MapEditor() {
       setEntities((prev) => prev.filter((ent) => hexKey(ent.q, ent.r) !== key));
       setSpawn((prevSpawn) => (prevSpawn && hexKey(prevSpawn.q, prevSpawn.r) === key ? null : prevSpawn));
     } else if (tool === "entity") {
-      // Single-click only — placing identical entities by dragging would
-      // be more confusing than useful, so this ignores drag-move events.
       if (!isStrokeStart) return;
       if (!floorSet.has(key)) return;
       const existing = entities.find((ent) => hexKey(ent.q, ent.r) === key);
       if (existing) {
         setSelectedEntityId(existing.id);
       } else if (objSubTool === 'library' && activeObjectId) {
-        // Placing a library object: auto-create an entity pre-filled with
-        // the object's defaults, footprint, and a reference to the object
-        // library ID so the game engine can fetch its art at runtime.
         const obj = objLibrary.find(o => o.id === activeObjectId);
         if (!obj) return;
         const newEntity = {
@@ -226,7 +214,7 @@ export default function MapEditor() {
           trigger: obj.default_trigger || null,
           blocksMovement: obj.default_blocks_movement || false,
           footprint: obj.footprint || [[0, 0]],
-          objectId: obj.id, // game engine resolves this to the actual image at runtime
+          objectId: obj.id,
           text: '',
           toScene: '',
         };
@@ -241,6 +229,31 @@ export default function MapEditor() {
       if (!isStrokeStart) return;
       if (!floorSet.has(key)) return;
       setSpawn({ q, r });
+    } else if (tool === "npc") {
+      if (!isStrokeStart) return;
+      if (!floorSet.has(key)) return;
+      if (!activeNpcId) return;
+      const template = npcLibrary.find(n => n.id === activeNpcId);
+      if (!template) return;
+      const existing = entities.find(ent => hexKey(ent.q, ent.r) === key);
+      if (existing) { setSelectedEntityId(existing.id); return; }
+      const newEntity = {
+        q, r,
+        id: `entity-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        label: template.name,
+        color: '#c4a747',
+        kind: 'npc',
+        trigger: 'enter',
+        blocksMovement: false,
+        npcTemplateId: template.id,
+        // npcBehaviour: 'idle_drift' is the engine default when omitted.
+        // Exposed in the entity panel for future patrol/stationary options.
+        npcBehaviour: 'idle_drift',
+        text: '',
+        toScene: '',
+      };
+      setEntities(prev => [...prev, newEntity]);
+      setSelectedEntityId(newEntity.id);
     }
   }
 
@@ -300,9 +313,6 @@ export default function MapEditor() {
   }
 
   function generateExport() {
-    // Each floor cell is [q, r, tileId]. tileId is null for the default
-    // art, or a string referencing a tile in the shared library — the
-    // game engine resolves these IDs to images at runtime.
     const floorStr = floor
       .map(([q, r, tileId, yOffset]) => {
         const tid = tileId ? JSON.stringify(tileId) : "null";
@@ -328,6 +338,8 @@ export default function MapEditor() {
         if (e.footprint && !(e.footprint.length === 1 && e.footprint[0][0] === 0 && e.footprint[0][1] === 0))
           fields.push(`footprint: ${JSON.stringify(e.footprint)}`);
         if (e.objectId) fields.push(`objectId: ${JSON.stringify(e.objectId)}`);
+        if (e.npcTemplateId) fields.push(`npcTemplateId: ${JSON.stringify(e.npcTemplateId)}`);
+        if (e.npcBehaviour && e.npcBehaviour !== 'idle_drift') fields.push(`npcBehaviour: ${JSON.stringify(e.npcBehaviour)}`);
         if (e.kind === "exit") {
           fields.push(`toScene: ${JSON.stringify(e.toScene || "")}`);
           fields.push(`spawn: { q: 0, r: 0 } /* TODO: set real spawn point in target scene */`);
@@ -353,19 +365,11 @@ ${entitiesStr}
     navigator.clipboard?.writeText(exportStr);
   }
 
-  // ---------------- Map save / load ----------------
-
   async function saveCurrentMap(forceNew = false) {
     setMapSaveStatus('saving');
     setMapSaveError(null);
     try {
-      const payload = {
-        name: sceneName,
-        sceneId,
-        floor,
-        entities,
-        spawn,
-      };
+      const payload = { name: sceneName, sceneId, floor, entities, spawn };
       if (loadedMapId && !forceNew) {
         await updateMap(loadedMapId, payload);
       } else {
@@ -487,12 +491,7 @@ ${entitiesStr}
             ))}
           </div>
           <div ref={viewportRef} style={{ position: "relative", width: CANVAS_W, height: CANVAS_H, border: `1px solid ${COLORS.border}`, overflow: 'auto', touchAction: tool === 'pan' ? 'pan-x pan-y' : 'none' }}>
-            {/* Tile art layer: plain HTML <img> tags (not SVG <image>),
-                since SVG <image> with data URIs doesn't render reliably
-                in some browser contexts — matches the approach used in
-                the actual game engine. */}
             <div style={{ position: "absolute", top: 0, left: 0, width: MAP_W * zoom, height: MAP_H * zoom, pointerEvents: "none" }}>
-              {/* Floor tiles — sorted back-to-front */}
               {[...floor]
                 .sort((a, b) => a[1] - b[1] || a[0] - b[0])
                 .map(([q, r, tileId, yOffset]) => {
@@ -517,11 +516,6 @@ ${entitiesStr}
                   );
                 })}
 
-              {/* Object images — sorted back-to-front alongside tiles,
-                  anchored so the image bottom sits at the hex face centre.
-                  Only entities that have an objectId get an image here;
-                  the SVG marker layer below shows a circle only when the
-                  entity is selected, so the image is the primary visual. */}
               {[...entities]
                 .filter(e => e.objectId)
                 .sort((a, b) => a.r - b.r || b.q - a.q)
@@ -552,6 +546,37 @@ ${entitiesStr}
                     />
                   );
                 })}
+
+              {/* NPC sprite previews in the editor — shows south-west facing */}
+              {[...entities]
+                .filter(e => e.kind === 'npc')
+                .map(e => {
+                  const template = npcLibrary.find(n => n.id === e.npcTemplateId);
+                  const previewUrl = template?.sprites?.['south-west'] || template?.sprites?.south || null;
+                  if (!previewUrl) return null;
+                  const { sx, sy } = hexToScreenZ(e.q, e.r);
+                  const isSelected = e.id === selectedEntityId;
+                  const spriteW = 116;
+                  const spriteH = 116;
+                  const spriteFeetOffset = 31;
+                  return (
+                    <img
+                      key={`npc-${e.id}`}
+                      src={previewUrl}
+                      alt={e.label}
+                      style={{
+                        position: "absolute",
+                        left: sx - (spriteW / 2) * zoom,
+                        top: sy - (spriteH - spriteFeetOffset) * zoom,
+                        width: spriteW * zoom,
+                        height: spriteH * zoom,
+                        imageRendering: "pixelated",
+                        outline: isSelected ? `2px solid ${COLORS.brass}` : "none",
+                        opacity: isSelected ? 1 : 0.9,
+                      }}
+                    />
+                  );
+                })}
             </div>
 
             <svg
@@ -568,7 +593,9 @@ ${entitiesStr}
               {entities.map((e) => {
                 const { sx, sy } = hexToScreenZ(e.q, e.r);
                 const isSelected = e.id === selectedEntityId;
-                if (e.objectId && !isSelected) return null;
+                // Object and NPC entities show their sprite image; only show the
+                // circle marker when selected (so you can tell which is active).
+                if ((e.objectId || e.kind === 'npc') && !isSelected) return null;
                 return (
                   <g key={e.id}>
                     <circle
@@ -628,6 +655,9 @@ ${entitiesStr}
             <button style={{ ...styles.toolBtn, ...(tool === "entity" ? styles.toolBtnActive : {}) }} onClick={() => { setTool("entity"); setObjSubTool('manual'); setActiveObjectId(null); }}>
               Entity
             </button>
+            <button style={{ ...styles.toolBtn, ...(tool === "npc" ? styles.toolBtnActive : {}) }} onClick={() => setTool("npc")}>
+              NPC
+            </button>
             <button style={{ ...styles.toolBtn, ...(tool === "spawn" ? styles.toolBtnActive : {}) }} onClick={() => setTool("spawn")}>
               Spawn
             </button>
@@ -646,30 +676,18 @@ ${entitiesStr}
             <div style={styles.tilePickerGrid}>
               <button
                 key="default"
-                onClick={() => {
-                    setActiveTileId(null);
-                    setTileYOffset(0);
-                  }}
+                onClick={() => { setActiveTileId(null); setTileYOffset(0); }}
                 title="default"
-                style={{
-                  ...styles.tileSwatchBtn,
-                  outline: activeTileId === null ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}`,
-                }}
+                style={{ ...styles.tileSwatchBtn, outline: activeTileId === null ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}` }}
               >
                 <img src={DEFAULT_TILE_IMG} alt="default" style={styles.tileSwatchImg} />
               </button>
               {tileLibrary.map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => {
-                    setActiveTileId(t.id);
-                    setTileYOffset(t.default_y_offset ?? 0);
-                  }}
+                  onClick={() => { setActiveTileId(t.id); setTileYOffset(t.default_y_offset ?? 0); }}
                   title={t.name}
-                  style={{
-                    ...styles.tileSwatchBtn,
-                    outline: activeTileId === t.id ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}`,
-                  }}
+                  style={{ ...styles.tileSwatchBtn, outline: activeTileId === t.id ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}` }}
                 >
                   <img src={t.image_data_url} alt={t.name} style={styles.tileSwatchImg} />
                 </button>
@@ -685,11 +703,7 @@ ${entitiesStr}
             {[[-6, '▲ +6 up'], [0, '— default'], [6, '▼ +6 down']].map(([val, label]) => (
               <button
                 key={val}
-                style={{
-                  ...styles.toolBtn,
-                  ...(tileYOffset === val ? styles.toolBtnActive : {}),
-                  gridColumn: val === 0 ? 'span 1' : undefined,
-                }}
+                style={{ ...styles.toolBtn, ...(tileYOffset === val ? styles.toolBtnActive : {}), gridColumn: val === 0 ? 'span 1' : undefined }}
                 onClick={() => setTileYOffset(val)}
               >
                 {label}
@@ -720,17 +734,46 @@ ${entitiesStr}
                   <button key={obj.id}
                     onClick={() => { setActiveObjectId(obj.id); setTool('entity'); }}
                     title={obj.name}
-                    style={{ ...styles.tileSwatchBtn,
-                      outline: activeObjectId === obj.id ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}` }}>
+                    style={{ ...styles.tileSwatchBtn, outline: activeObjectId === obj.id ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}` }}>
                     <img src={obj.image_data_url} alt={obj.name} style={styles.tileSwatchImg} />
                   </button>
                 ))}
               </div>
               {activeObjectId
-                ? <div style={styles.hint}>
-                    ✓ {objLibrary.find(o => o.id === activeObjectId)?.name} selected — make sure Entity tool is active, then click a floor tile
-                  </div>
+                ? <div style={styles.hint}>✓ {objLibrary.find(o => o.id === activeObjectId)?.name} selected — make sure Entity tool is active, then click a floor tile</div>
                 : <div style={styles.hint}>pick an object above, then click a floor tile to place it</div>
+              }
+            </>
+          )}
+
+          {/* ---- NPC placement picker ---- */}
+          <div style={styles.sectionLabel}>place npc</div>
+          {npcLibraryLoading && <div style={styles.hint}>loading npc templates...</div>}
+          {npcLibraryError && <div style={{ ...styles.hint, color: COLORS.rust }}>{npcLibraryError}</div>}
+          {!npcLibraryLoading && !npcLibraryError && npcLibrary.length === 0 && (
+            <div style={styles.hint}>no npc templates yet — generate one in the Character Generator</div>
+          )}
+          {!npcLibraryLoading && npcLibrary.length > 0 && (
+            <>
+              <div style={styles.tilePickerGrid}>
+                {npcLibrary.map(npc => {
+                  const previewUrl = npc.sprites?.['south-west'] || npc.sprites?.south || null;
+                  return (
+                    <button key={npc.id}
+                      onClick={() => { setActiveNpcId(npc.id); setTool('npc'); }}
+                      title={`${npc.name}${npc.role ? ' — ' + npc.role : ''}`}
+                      style={{ ...styles.tileSwatchBtn, outline: activeNpcId === npc.id ? `2px solid ${COLORS.brass}` : `1px solid ${COLORS.border}` }}>
+                      {previewUrl
+                        ? <img src={previewUrl} alt={npc.name} style={styles.tileSwatchImg} />
+                        : <span style={{ fontSize: '18px' }}>👤</span>
+                      }
+                    </button>
+                  );
+                })}
+              </div>
+              {activeNpcId
+                ? <div style={styles.hint}>✓ {npcLibrary.find(n => n.id === activeNpcId)?.name} — NPC tool active, click a floor tile to place</div>
+                : <div style={styles.hint}>pick a template above, then click a floor tile (NPC tool activates automatically)</div>
               }
             </>
           )}
@@ -813,6 +856,24 @@ ${entitiesStr}
                 </>
               )}
 
+              {selectedEntity.kind === "npc" && (
+                <>
+                  {selectedEntity.npcTemplateId && (
+                    <div style={styles.hint}>linked to template — name/sprites loaded at runtime</div>
+                  )}
+                  <label style={styles.fieldLabel}>behaviour</label>
+                  <select
+                    style={styles.textInput}
+                    value={selectedEntity.npcBehaviour || 'idle_drift'}
+                    onChange={(e) => updateSelectedEntity({ npcBehaviour: e.target.value })}
+                  >
+                    <option value="idle_drift">idle drift (occasional random step)</option>
+                    <option value="stationary">stationary (never moves)</option>
+                    <option value="patrol">patrol (set path — future)</option>
+                  </select>
+                </>
+              )}
+
               <button style={styles.dangerBtn} onClick={deleteSelectedEntity}>
                 Delete entity
               </button>
@@ -839,7 +900,6 @@ ${entitiesStr}
         </div>
       )}
 
-      {/* Load map panel */}
       {loadPanelOpen && (
         <div style={styles.loadOverlay} onClick={() => setLoadPanelOpen(false)}>
           <div style={styles.loadPanel} onClick={e => e.stopPropagation()}>
@@ -885,299 +945,44 @@ const COLORS = {
 };
 
 const styles = {
-  root: {
-    background: COLORS.bg,
-    color: COLORS.text,
-    minHeight: "600px",
-    fontFamily: "'Space Mono', monospace",
-    border: `1px solid ${COLORS.border}`,
-  },
-  header: {
-    padding: "12px 18px",
-    borderBottom: `1px solid ${COLORS.border}`,
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: "8px",
-  },
-  headerActions: {
-    display: "flex",
-    gap: "6px",
-    alignItems: "center",
-  },
-  headerSavedName: {
-    fontSize: "11px",
-    color: COLORS.textDim,
-    fontStyle: "italic",
-    marginRight: "4px",
-  },
-  headerBtn: {
-    background: COLORS.panel,
-    border: `1px solid ${COLORS.border}`,
-    color: COLORS.text,
-    padding: "6px 12px",
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "11px",
-    cursor: "pointer",
-  },
-  headerBtnPrimary: {
-    background: COLORS.rust,
-    border: `1px solid ${COLORS.rust}`,
-    color: COLORS.text,
-  },
-  saveConfirm: {
-    padding: "4px 18px",
-    fontSize: "10px",
-    color: COLORS.brass,
-    background: COLORS.panel,
-    borderBottom: `1px solid ${COLORS.border}`,
-  },
-  loadOverlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.7)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  loadPanel: {
-    background: COLORS.bg,
-    border: `1px solid ${COLORS.brass}`,
-    width: "420px",
-    maxHeight: "70vh",
-    display: "flex",
-    flexDirection: "column",
-  },
-  loadPanelHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "10px 14px",
-    borderBottom: `1px solid ${COLORS.border}`,
-    fontSize: "12px",
-    fontWeight: 700,
-    color: COLORS.brass,
-    letterSpacing: "0.08em",
-  },
-  loadCloseBtn: {
-    background: "transparent",
-    border: "none",
-    color: COLORS.text,
-    fontSize: "18px",
-    cursor: "pointer",
-    lineHeight: 1,
-  },
-  loadPanelBody: {
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
-    padding: "8px",
-    gap: "4px",
-  },
-  mapListItem: {
-    background: COLORS.panel,
-    border: `1px solid ${COLORS.border}`,
-    color: COLORS.text,
-    padding: "10px 12px",
-    cursor: "pointer",
-    textAlign: "left",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "8px",
-  },
-  mapListName: {
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "12px",
-    color: COLORS.text,
-  },
-  mapListMeta: {
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "9px",
-    color: COLORS.textDim,
-    whiteSpace: "nowrap",
-  },
-  headerStamp: {
-    fontFamily: "'Courier Prime', monospace",
-    fontWeight: 700,
-    letterSpacing: "0.08em",
-    fontSize: "13px",
-    color: COLORS.brass,
-  },
-  headerSub: {
-    fontSize: "10px",
-    color: COLORS.textDim,
-    fontStyle: "italic",
-  },
-  body: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "20px",
-    padding: "18px",
-  },
-  canvasWrap: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-  },
-  canvasLabel: {
-    fontSize: "10px",
-    color: COLORS.textDim,
-    maxWidth: CANVAS_W,
-  },
-  sidebar: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-    minWidth: "260px",
-    maxWidth: "260px",
-  },
-  sectionLabel: {
-    fontSize: "10px",
-    color: COLORS.textDim,
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    marginTop: "10px",
-    marginBottom: "2px",
-  },
-  fieldLabel: {
-    fontSize: "9px",
-    color: COLORS.textDim,
-    marginTop: "6px",
-  },
-  textInput: {
-    background: COLORS.panel,
-    border: `1px solid ${COLORS.border}`,
-    color: COLORS.text,
-    padding: "8px",
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "12px",
-    width: "100%",
-  },
-  textArea: {
-    background: COLORS.panel,
-    border: `1px solid ${COLORS.border}`,
-    color: COLORS.text,
-    padding: "8px",
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "12px",
-    width: "100%",
-    height: "60px",
-    resize: "vertical",
-  },
-  colorInput: {
-    width: "60px",
-    height: "32px",
-    background: "transparent",
-    border: `1px solid ${COLORS.border}`,
-    cursor: "pointer",
-    flexShrink: 0,
-  },
-  checkRow: {
-    fontSize: "11px",
-    color: COLORS.textDim,
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-    marginTop: "6px",
-  },
-  toolGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "6px",
-  },
-  toolBtn: {
-    background: COLORS.panel,
-    border: `1px solid ${COLORS.border}`,
-    color: COLORS.textDim,
-    padding: "8px",
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "11px",
-    cursor: "pointer",
-  },
-  toolBtnActive: {
-    color: COLORS.brass,
-    borderColor: COLORS.brass,
-  },
-  tilePickerGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(4, 1fr)",
-    gap: "4px",
-  },
-  tileSwatchBtn: {
-    background: COLORS.panel,
-    border: "none",
-    cursor: "pointer",
-    padding: "3px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "40px",
-  },
-  tileSwatchImg: {
-    width: "36px",
-    height: "30px",
-    objectFit: "contain",
-    imageRendering: "pixelated",
-  },
-  actionBtn: {
-    background: COLORS.panel,
-    border: `1px solid ${COLORS.border}`,
-    color: COLORS.text,
-    padding: "8px",
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "11px",
-    cursor: "pointer",
-    textAlign: "left",
-  },
-  dangerBtn: {
-    background: COLORS.rust,
-    border: "none",
-    color: COLORS.text,
-    padding: "8px",
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "11px",
-    cursor: "pointer",
-    marginTop: "10px",
-  },
-  exportBtn: {
-    background: COLORS.rust,
-    border: "none",
-    color: COLORS.text,
-    padding: "10px",
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "11px",
-    cursor: "pointer",
-  },
-  hint: {
-    fontSize: "9px",
-    color: COLORS.textDim,
-    fontStyle: "italic",
-    marginTop: "4px",
-  },
-  exportPanel: {
-    borderTop: `1px solid ${COLORS.border}`,
-    padding: "18px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "10px",
-  },
-  exportLabel: {
-    fontSize: "10px",
-    color: COLORS.textDim,
-    marginBottom: "4px",
-  },
-  exportTextarea: {
-    width: "100%",
-    height: "200px",
-    background: COLORS.panel,
-    border: `1px solid ${COLORS.border}`,
-    color: COLORS.brass,
-    fontFamily: "'Space Mono', monospace",
-    fontSize: "10px",
-    padding: "8px",
-    resize: "vertical",
-  },
+  root: { background: COLORS.bg, color: COLORS.text, minHeight: "600px", fontFamily: "'Space Mono', monospace", border: `1px solid ${COLORS.border}` },
+  header: { padding: "12px 18px", borderBottom: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" },
+  headerActions: { display: "flex", gap: "6px", alignItems: "center" },
+  headerSavedName: { fontSize: "11px", color: COLORS.textDim, fontStyle: "italic", marginRight: "4px" },
+  headerBtn: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.text, padding: "6px 12px", fontFamily: "'Space Mono', monospace", fontSize: "11px", cursor: "pointer" },
+  headerBtnPrimary: { background: COLORS.rust, border: `1px solid ${COLORS.rust}`, color: COLORS.text },
+  saveConfirm: { padding: "4px 18px", fontSize: "10px", color: COLORS.brass, background: COLORS.panel, borderBottom: `1px solid ${COLORS.border}` },
+  loadOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 },
+  loadPanel: { background: COLORS.bg, border: `1px solid ${COLORS.brass}`, width: "420px", maxHeight: "70vh", display: "flex", flexDirection: "column" },
+  loadPanelHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: `1px solid ${COLORS.border}`, fontSize: "12px", fontWeight: 700, color: COLORS.brass, letterSpacing: "0.08em" },
+  loadCloseBtn: { background: "transparent", border: "none", color: COLORS.text, fontSize: "18px", cursor: "pointer", lineHeight: 1 },
+  loadPanelBody: { overflowY: "auto", display: "flex", flexDirection: "column", padding: "8px", gap: "4px" },
+  mapListItem: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.text, padding: "10px 12px", cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" },
+  mapListName: { fontFamily: "'Space Mono', monospace", fontSize: "12px", color: COLORS.text },
+  mapListMeta: { fontFamily: "'Space Mono', monospace", fontSize: "9px", color: COLORS.textDim, whiteSpace: "nowrap" },
+  headerStamp: { fontFamily: "'Courier Prime', monospace", fontWeight: 700, letterSpacing: "0.08em", fontSize: "13px", color: COLORS.brass },
+  headerSub: { fontSize: "10px", color: COLORS.textDim, fontStyle: "italic" },
+  body: { display: "flex", flexWrap: "wrap", gap: "20px", padding: "18px" },
+  canvasWrap: { display: "flex", flexDirection: "column", gap: "8px" },
+  canvasLabel: { fontSize: "10px", color: COLORS.textDim, maxWidth: CANVAS_W },
+  sidebar: { display: "flex", flexDirection: "column", gap: "6px", minWidth: "260px", maxWidth: "260px" },
+  sectionLabel: { fontSize: "10px", color: COLORS.textDim, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: "10px", marginBottom: "2px" },
+  fieldLabel: { fontSize: "9px", color: COLORS.textDim, marginTop: "6px" },
+  textInput: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.text, padding: "8px", fontFamily: "'Space Mono', monospace", fontSize: "12px", width: "100%" },
+  textArea: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.text, padding: "8px", fontFamily: "'Space Mono', monospace", fontSize: "12px", width: "100%", height: "60px", resize: "vertical" },
+  colorInput: { width: "60px", height: "32px", background: "transparent", border: `1px solid ${COLORS.border}`, cursor: "pointer", flexShrink: 0 },
+  checkRow: { fontSize: "11px", color: COLORS.textDim, display: "flex", alignItems: "center", gap: "6px", marginTop: "6px" },
+  toolGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" },
+  toolBtn: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.textDim, padding: "8px", fontFamily: "'Space Mono', monospace", fontSize: "11px", cursor: "pointer" },
+  toolBtnActive: { color: COLORS.brass, borderColor: COLORS.brass },
+  tilePickerGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "4px" },
+  tileSwatchBtn: { background: COLORS.panel, border: "none", cursor: "pointer", padding: "3px", display: "flex", alignItems: "center", justifyContent: "center", height: "40px" },
+  tileSwatchImg: { width: "36px", height: "30px", objectFit: "contain", imageRendering: "pixelated" },
+  actionBtn: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.text, padding: "8px", fontFamily: "'Space Mono', monospace", fontSize: "11px", cursor: "pointer", textAlign: "left" },
+  dangerBtn: { background: COLORS.rust, border: "none", color: COLORS.text, padding: "8px", fontFamily: "'Space Mono', monospace", fontSize: "11px", cursor: "pointer", marginTop: "10px" },
+  exportBtn: { background: COLORS.rust, border: "none", color: COLORS.text, padding: "10px", fontFamily: "'Space Mono', monospace", fontSize: "11px", cursor: "pointer" },
+  hint: { fontSize: "9px", color: COLORS.textDim, fontStyle: "italic", marginTop: "4px" },
+  exportPanel: { borderTop: `1px solid ${COLORS.border}`, padding: "18px", display: "flex", flexDirection: "column", gap: "10px" },
+  exportLabel: { fontSize: "10px", color: COLORS.textDim, marginBottom: "4px" },
+  exportTextarea: { width: "100%", height: "200px", background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.brass, fontFamily: "'Space Mono', monospace", fontSize: "10px", padding: "8px", resize: "vertical" },
 };

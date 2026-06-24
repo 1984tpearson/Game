@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import WreckAndRuinGame from '../components/WreckAndRuinGame.jsx';
 import { listMaps, loadMap, getGameConfig } from '../lib/maps.js';
 import { getObjectsByIds } from '../lib/objects.js';
-import { listPlayerCharacters } from '../lib/characters.js';
+import { listPlayerCharacters, getNpcTemplatesByIds } from '../lib/characters.js';
 
 export default function GamePage() {
   const [scenes, setScenes] = useState(null);
@@ -50,6 +50,34 @@ export default function GamePage() {
               if (e.objectId && objMap[e.objectId]) {
                 const obj = objMap[e.objectId];
                 return { ...e, imageDataUrl: obj.image_data_url, widthPx: obj.width_px, heightPx: obj.height_px };
+              }
+              return e;
+            });
+          }
+        }
+
+        // Resolve NPC templates — stamp sprites + character data onto placed
+        // NPC entities so the engine has everything it needs without extra
+        // fetches at runtime.
+        const allNpcTemplateIds = Object.values(scenesObj)
+          .flatMap(s => s.entities)
+          .map(e => e.npcTemplateId)
+          .filter(Boolean);
+
+        if (allNpcTemplateIds.length > 0) {
+          const npcMap = await getNpcTemplatesByIds(allNpcTemplateIds);
+          for (const scene of Object.values(scenesObj)) {
+            scene.entities = scene.entities.map(e => {
+              if (e.npcTemplateId && npcMap[e.npcTemplateId]) {
+                const npc = npcMap[e.npcTemplateId];
+                return {
+                  ...e,
+                  npcSprites: npc.sprites,
+                  npcName: npc.name,
+                  npcRole: npc.role,
+                  npcBlurb: npc.blurb,
+                  npcPersonalityNotes: npc.personality_notes,
+                };
               }
               return e;
             });
