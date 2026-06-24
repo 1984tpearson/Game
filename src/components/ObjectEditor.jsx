@@ -407,7 +407,7 @@ export default function ObjectEditor() {
     setGenPreviewUrl(null);
     try {
       const PROXY = 'https://keqzqhykfygplolcnxnn.supabase.co/functions/v1/pixellab-proxy';
-      const res = await fetch(`${PROXY}/create-image-pixflux`, {
+      const res = await fetch(`${PROXY}/create-image-pixen`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
